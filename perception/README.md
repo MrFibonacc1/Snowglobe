@@ -1,12 +1,64 @@
 # perception
 
-Video in → Cosmos 3 Reasoner detections → events out.
+Video in → **Cosmos 3 Reasoner** detections → events out.
 
-Samples frames (~1 fps) from a webcam or clip, sends each to NVIDIA's
-Cosmos 3 Reasoner (physical-AI VLM) via
-NVIDIA NIM with one prompt per event type, normalizes responses into the
-[shared event schema](../shared/event_schema.json), and POSTs them to
-`automation/`'s `/events` endpoint.
+Samples frames (~1 fps) from a webcam, RTSP stream, or clip; sends each to
+NVIDIA's Cosmos 3 Reasoner (physical-AI VLM) via NIM with one prompt per event
+type; normalizes responses into the [shared event schema](../shared/event_schema.json);
+and POSTs them to `automation/`'s `/events` endpoint.
 
-Dev mode: `--dump` writes events to a file instead of POSTing, so this side
-runs standalone.
+## Run
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # fill in NVIDIA_API_KEY (or use --mock)
+
+# Offline smoke test — no API key, no camera:
+python -m perception.make_test_clip --out demo/synthetic.mp4
+python -m perception --source demo/synthetic.mp4 --zone zone_b --mock \
+  --events spill,person_count,safety_violation,foot_traffic --dump out.jsonl
+
+# Real detection against a clip, POSTing to automation/:
+python -m perception --source demo/spill.mp4 --zone zone_b
+
+# Live webcam:
+python -m perception --source webcam --zone zone_a
+```
+
+Serve saved frames so `snapshot_url`s resolve (for the dashboard / H agent):
+
+```bash
+python -m perception.snapshot_server        # http://localhost:8001/snapshots/...
+```
+
+## Files
+
+| File | Role |
+|---|---|
+| `sampler.py` | OpenCV capture; frame skipping (files) or wall-clock gating (live); saves JPEGs to `snapshots/` |
+| `vlm.py` | `VLMDetector` (Cosmos 3 via NIM) + `MockDetector` (offline); defensive JSON extraction that strips `<think>…</think>` |
+| `prompts.py` | One prompt per event type; all return `{detected, confidence, count, detail}` |
+| `emit.py` | Builds schema-valid events (validates via `jsonschema`), POSTs or dumps JSONL |
+| `pipeline.py` | Orchestration + `TrafficAggregator` |
+| `__main__.py` | CLI |
+| `snapshot_server.py` | Static host for saved frames |
+| `make_test_clip.py` | Synthetic clip generator for offline tests |
+
+## Notes / decisions
+
+- **Model** is configurable (`VLM_MODEL` / `--model`). Default is Cosmos 3
+  Reasoner Nano on the hosted NIM; swap to Super's reasoner with GPU access,
+  or a Nemotron-VL fallback if Cosmos rate-limits. The NIM call is
+  OpenAI-compatible chat-completions with a base64 image part, so any of these
+  drop in without code changes.
+- **`foot_traffic` is derived from `person_count`** over a sliding window
+  (`--traffic-window`, default 30s), not a separate per-frame model call —
+  throughput is inherently temporal. A `foot_traffic` prompt still exists in
+  `prompts.py` if you want per-frame throughput instead.
+- **Dedup:** the automation engine owns cooldown/dedup (one spill → one run).
+  `--cooldown` adds an optional perception-side debounce for standalone
+  `--dump` runs; it's off by default.
+- **`--mock`** produces deterministic verdicts from a frame hash so the whole
+  pipeline runs with no API key — use it to develop against `automation/` and
+  the dashboard before touching credits.
