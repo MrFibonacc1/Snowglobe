@@ -12,3 +12,5 @@ dashboard/vite.config.d.ts
 demo/*.mp4
 demo/*.mov
 snapshots/
+automation/data.db
+automation/.venv/
