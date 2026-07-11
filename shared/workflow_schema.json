@@ -38,11 +38,11 @@
           "id": { "type": "string" },
           "type": {
             "type": "string",
-            "enum": ["h_agent", "composio", "condition", "voice"]
+            "enum": ["h_agent", "composio", "condition", "voice", "mcp"]
           },
           "config": {
             "type": "object",
-            "description": "Per-type config. h_agent: {task: google_form|ticket|custom_url, url, instructions}. composio: {action: drive_upload|sheets_append|slack_message, ...params}. condition: {expression}. voice: {text}.",
+            "description": "Per-type config. h_agent: {task: google_form|ticket|custom_url, url, instructions}. composio: {action: drive_upload|sheets_append|slack_message, ...params}. condition: {expression}. voice: {text}. mcp: {server_url, tool, arguments} — call any tool on any MCP server (Google Workspace, Slack, Notion, …).",
             "additionalProperties": true
           }
         }

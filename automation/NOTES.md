@@ -100,6 +100,32 @@ Executor calls `client.tools.execute(slug=…, user_id=…, arguments=…)`. Slu
 Without `COMPOSIO_API_KEY`, actions log their payload and return
 `{"stubbed": true}` — runs still complete, dashboard still animates.
 
+## MCP step (`steps/mcp_step.py`) — the flexible integration lane
+
+A generic step that calls **any tool on any MCP server** (streamable HTTP):
+
+```json
+{ "type": "mcp", "config": {
+    "server_url": "https://<your-mcp-server>/mcp",
+    "tool": "sheets_append_row",
+    "arguments": { "spreadsheet": "incidents",
+                   "values": ["{{event.timestamp}}", "{{event.location}}"] } } }
+```
+
+- Templating applies inside `arguments`, so camera data flows into the tool.
+- Auth: `MCP_SERVER_TOKEN` env (or per-step `token`) is sent as a Bearer
+  header; servers with their own OAuth (hosted Google MCPs) handle it after a
+  one-time account link on the server's side.
+- Defaults: `MCP_SERVER_URL` env is used when a step omits `server_url`.
+- Verified against `mock_mcp_server.py`
+  (`.venv/bin/uvicorn mock_mcp_server:app --port 8200`) — full pipeline:
+  fake spill → workflow → mcp step → tool call with templated args. ✅
+
+For Google Sheets/Drive specifically, point it at any Google Workspace MCP
+server (hosted ones exist — e.g. Composio's per-toolkit MCP URLs — or run a
+community Google MCP server; either way the tool names come from that
+server's `tools/list`). Check the exact tool names/args before the demo.
+
 ## Env summary
 
 | Var | Needed for |

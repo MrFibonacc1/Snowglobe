@@ -158,6 +158,14 @@ function StepDetail({ step }: { step: RunStep }) {
   if (step.type === 'voice') {
     return <div className="tl-sub">{out.text ? String(out.text) : 'voice'}</div>
   }
+  if (step.type === 'mcp') {
+    return (
+      <div className="tl-sub">
+        <span className="faint">{String(out.tool ?? 'mcp')} · </span>
+        {String(out.result ?? '')}
+      </div>
+    )
+  }
   return null
 }
 
