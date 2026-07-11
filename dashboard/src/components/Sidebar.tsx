@@ -4,9 +4,16 @@ import {
   IconPlug,
   IconBolt,
   IconList,
+  IconFlask,
 } from './icons'
 
-export type View = 'overview' | 'cameras' | 'integrations' | 'automations' | 'events'
+export type View =
+  | 'overview'
+  | 'cameras'
+  | 'integrations'
+  | 'automations'
+  | 'events'
+  | 'testing'
 
 interface Props {
   view: View
@@ -20,6 +27,7 @@ const NAV: { id: View; label: string; icon: JSX.Element }[] = [
   { id: 'integrations', label: 'Integrations', icon: <IconPlug size={17} /> },
   { id: 'automations', label: 'Automations', icon: <IconBolt size={17} /> },
   { id: 'events', label: 'Event log', icon: <IconList size={17} /> },
+  { id: 'testing', label: 'Testing', icon: <IconFlask size={17} /> },
 ]
 
 export function Sidebar({ view, onChange, counts }: Props) {

@@ -3,3 +3,7 @@ numpy>=1.26
 requests>=2.31
 jsonschema>=4.21
 python-dotenv>=1.0
+# Detect API for the dashboard Testing page (perception/server.py)
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9

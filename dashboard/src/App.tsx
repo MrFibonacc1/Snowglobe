@@ -6,6 +6,7 @@ import { Cameras } from './pages/Cameras'
 import { Integrations } from './pages/Integrations'
 import { Automations } from './pages/Automations'
 import { Events } from './pages/Events'
+import { Testing } from './pages/Testing'
 
 const TITLES: Record<View, { title: string; sub: string }> = {
   overview: { title: 'Overview', sub: 'Live perception and agent activity at a glance' },
@@ -13,6 +14,7 @@ const TITLES: Record<View, { title: string; sub: string }> = {
   integrations: { title: 'Integrations', sub: 'Action targets the agent and Composio can drive' },
   automations: { title: 'Automations', sub: 'Turn detections into actions' },
   events: { title: 'Event log', sub: 'Everything perception has detected' },
+  testing: { title: 'Testing', sub: 'Upload an image and run detection through the perception model' },
 }
 
 export default function App() {
@@ -58,6 +60,7 @@ export default function App() {
           {view === 'integrations' && <Integrations store={store} />}
           {view === 'automations' && <Automations store={store} />}
           {view === 'events' && <Events store={store} />}
+          {view === 'testing' && <Testing />}
         </div>
       </div>
     </div>

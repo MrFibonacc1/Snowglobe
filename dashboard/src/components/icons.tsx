@@ -44,3 +44,12 @@ export const IconArrow = ({ size }: P) => (
 export const IconClose = ({ size }: P) => (
   <svg {...base(size)}><path d="M6 6l12 12M18 6 6 18" /></svg>
 )
+export const IconUpload = ({ size }: P) => (
+  <svg {...base(size)}><path d="M12 16V4M7 9l5-5 5 5M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" /></svg>
+)
+export const IconImage = ({ size }: P) => (
+  <svg {...base(size)}><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg>
+)
+export const IconFlask = ({ size }: P) => (
+  <svg {...base(size)}><path d="M9 3h6M10 3v6l-5 9a1.5 1.5 0 0 0 1.3 2.2h11.4A1.5 1.5 0 0 0 19 18l-5-9V3" /><path d="M7.5 14h9" /></svg>
+)
