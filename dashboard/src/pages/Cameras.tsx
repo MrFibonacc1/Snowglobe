@@ -193,7 +193,7 @@ function AddCameraModal({
             placeholder={source === 'rtsp' ? 'rtsp://10.0.0.20/stream1' : 'https://…/index.m3u8'}
           />
           <span className="hint">
-            Perception samples this feed at 1 fps and sends frames to the NeMo VLM.
+            Perception samples this feed at 1 fps and sends frames to the Cosmos 3 Reasoner.
           </span>
         </div>
       )}

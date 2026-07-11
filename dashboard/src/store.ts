@@ -131,7 +131,7 @@ export function useStore() {
         payload:
           type === 'person_count' || type === 'foot_traffic'
             ? { count: Math.floor(5 + seededRandom() * 40) }
-            : { detail: 'Detected by NeMo VLM' },
+            : { detail: 'Detected by Cosmos 3 Reasoner' },
       })
     }
 

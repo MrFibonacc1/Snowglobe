@@ -6,7 +6,7 @@ first.
 
 ## Goal
 
-`video source → 1 fps frames → Nemotron VLM (NVIDIA NIM API) → events →
+`video source → 1 fps frames → Cosmos 3 Reasoner (NVIDIA NIM API) → events →
 POST http://localhost:8000/events`
 
 Events MUST validate against [shared/event_schema.json](../shared/event_schema.json).
@@ -16,9 +16,13 @@ Events MUST validate against [shared/event_schema.json](../shared/event_schema.j
 1. **Frame sampler** (`perception/sampler.py`): OpenCV capture from
    `--source webcam|<rtsp-url>|<file-path>`, sample ~1 fps, save each frame
    as JPEG to `snapshots/` with a timestamped name.
-2. **NIM client** (`perception/vlm.py`): send a frame + prompt to Nemotron VL
-   via the NIM API (`NVIDIA_API_KEY` env var), request JSON-only output,
-   parse defensively (VLMs sometimes wrap JSON in prose — extract it).
+2. **NIM client** (`perception/vlm.py`): send a frame + prompt to the
+   **Cosmos 3 Reasoner** via the NIM API (`NVIDIA_API_KEY` env var) —
+   default model `cosmos3-nano-reasoner` on build.nvidia.com; upgrade to
+   Cosmos 3 Super's reasoner if NVIDIA mentors give us datacenter GPU
+   access; Nemotron VL as fallback. Request JSON-only output and parse
+   defensively — reasoning models wrap answers in `<think>…</think>` blocks,
+   so strip those before extracting the JSON verdict.
 3. **Prompt library** (`perception/prompts.py`): one prompt per event type —
    `spill`, `person_count`, `foot_traffic`, `safety_violation`. Each prompt
    asks for a JSON verdict: `{"detected": bool, "confidence": 0-1, "count": int?, "detail": str?}`.

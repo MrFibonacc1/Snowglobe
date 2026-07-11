@@ -1,7 +1,7 @@
 # palantirV2 — Agent Context
 
-Hackathon project (Computer Use Hackathon, 48h). Cameras → NVIDIA NeMo VLM
-detections → structured events → custom workflow engine → H Company agents
+Hackathon project (Computer Use Hackathon, 48h). Cameras → NVIDIA Cosmos 3
+Reasoner detections → structured events → custom workflow engine → H Company agents
 (via OpenClaw) + Composio actions. Read [PLAN.md](PLAN.md) first — it defines
 the architecture, data contracts, and work split. This file is operational
 context for agents working in this repo.

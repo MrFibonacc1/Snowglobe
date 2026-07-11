@@ -1,8 +1,9 @@
 # palantirV2 — Project Plan (v2, 3-person split)
 
 **Ambient perception → agentic action.** Cameras watch a physical space.
-**NVIDIA NeMo** (Nemotron VLM via NIM) turns frames into structured events —
-spills, occupancy, foot traffic, safety violations. Those events flow into our
+**NVIDIA Cosmos 3's Reasoner** (Super where we have the compute, Nano via the
+hosted NIM endpoint otherwise) turns frames into structured events — spills,
+occupancy, foot traffic, safety violations. Those events flow into our
 **own workflow builder**: users visually compose automations whose steps are
 **H Company agent** runs (fill a Google Form, create a ticket — orchestrated
 through **OpenClaw**) and **Composio** actions (Drive, Sheets, Slack). A live
@@ -14,7 +15,7 @@ Built at The Computer Use Hackathon (H Company / NVIDIA / Accel), Jul 11–12 20
 
 | Layer | Tech | Role |
 |---|---|---|
-| Perception | NVIDIA NeMo — Nemotron VLM via NIM API | Frames → detections (one prompt per event type) |
+| Perception | **NVIDIA Cosmos 3 Reasoner** via NIM API (`cosmos3-nano-reasoner` hosted on build.nvidia.com; Super's 32B reasoner if we get datacenter GPU access; Nemotron VL as fallback) | Frames → detections (one prompt per event type) |
 | Events | Our JSON schema over HTTP | The contract between all parts |
 | Workflow engine | **Custom** — FastAPI backend | Trigger matching, step execution, run logs |
 | Workflow builder UI | Our dashboard (React/Vite, built) | Visual editor: trigger + ordered action steps |
@@ -29,8 +30,8 @@ Built at The Computer Use Hackathon (H Company / NVIDIA / Accel), Jul 11–12 20
         │
         ▼
  ┌──────────────────┐  1 fps   ┌───────────────────────────┐
- │   perception/     │ ───────▶ │ NVIDIA NeMo (Nemotron VL   │
- │   frame sampler   │          │ via NIM API)               │
+ │   perception/     │ ───────▶ │ NVIDIA Cosmos 3 Reasoner   │
+ │   frame sampler   │          │ (Super/Nano via NIM API)   │
  └──────────────────┘          └────────────┬───────────────┘
                                             │ detections
                                             ▼
@@ -70,7 +71,7 @@ Built at The Computer Use Hackathon (H Company / NVIDIA / Accel), Jul 11–12 20
 
 ```
 palantirV2/
-  perception/    # Python: sampler → NeMo VLM → events                    (Person A)
+  perception/    # Python: sampler → Cosmos 3 Reasoner → events           (Person A)
   automation/    # Python/FastAPI: workflow engine + OpenClaw + Composio  (Person B)
   dashboard/     # React: console + workflow builder UI  [BUILT — extend] (Person C)
   shared/        # event_schema.json + workflow_schema.json — the contracts
@@ -155,8 +156,18 @@ palantirV2/
 1. Frame sampler: OpenCV capture from webcam / RTSP / video file at ~1 fps,
    selected with a `--source` flag. Save each sampled frame to `snapshots/`
    (served via a static route so `snapshot_url` resolves).
-2. NIM client: call Nemotron VLM with one prompt per event type; force JSON
-   output; parse and validate against the event schema.
+2. NIM client: call the **Cosmos 3 Reasoner** with one prompt per event type;
+   force JSON output; parse and validate against the event schema.
+   - Model choice: `cosmos3-nano-reasoner` (hosted NIM on build.nvidia.com)
+     is the default; upgrade to **Cosmos 3 Super**'s 32B reasoner if NVIDIA
+     gives us datacenter GPU access at the event (ask their mentors — Super
+     needs Hopper/Blackwell; Nano runs on workstation GPUs). Nemotron VL is
+     the fallback if Cosmos endpoints rate-limit.
+   - Why Cosmos over a generic VLM: it's post-trained for physical-world
+     video reasoning — timestamped event localization, bounding-box
+     grounding, physical common sense — and leads the smart-space benchmarks.
+     Exactly our spill/PPE/crowd problem, and the strongest NVIDIA
+     Challenge story.
 3. Prompt library: spill, person_count, foot_traffic (counts over a window),
    safety_violation (PPE / blocked exit). Tune on saved demo clips, not the
    live camera — cached frames make iteration free.
@@ -241,5 +252,7 @@ from mock-backed to real and turns the Automations page into the builder:
 
 - **Main (H Company):** agents doing visible multi-step UI work, composable
   by end users in a workflow builder — a genuinely new interface to their tech.
-- **NVIDIA Challenge:** NeMo/Nemotron VLM is the entire perception layer.
+- **NVIDIA Challenge:** Cosmos 3 Reasoner (their flagship physical-AI model,
+  released June 2026) is the entire perception layer — used for exactly the
+  smart-space workload it was built for.
 - **Gradium Challenge:** voice step in the builder (stretch).
