@@ -1,6 +1,15 @@
 import { useState } from 'react'
 import { useStore } from './store'
-import { Sidebar, type View } from './components/Sidebar'
+import { AppSidebar, type View } from './components/AppSidebar'
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from '@/components/ui/sidebar'
+import { Separator } from '@/components/ui/separator'
+import { Button } from '@/components/ui/button'
+import { Toaster } from '@/components/ui/sonner'
+import { StatusDot } from './components/ui-kit'
 import { Overview } from './pages/Overview'
 import { Cameras } from './pages/Cameras'
 import { Integrations } from './pages/Integrations'
@@ -25,8 +34,8 @@ export default function App() {
   const { title, sub } = TITLES[view]
 
   return (
-    <div className="app">
-      <Sidebar
+    <SidebarProvider>
+      <AppSidebar
         view={view}
         onChange={setView}
         counts={{
@@ -36,27 +45,31 @@ export default function App() {
         }}
       />
 
-      <div className="main">
-        <div className="topbar">
-          <div>
-            <h1>{title}</h1>
-            <div className="sub">{sub}</div>
+      <SidebarInset>
+        <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 border-b bg-background/80 px-4 backdrop-blur">
+          <SidebarTrigger className="-ml-1" />
+          <Separator orientation="vertical" className="mr-2 h-5" />
+          <div className="flex-1">
+            <h1 className="font-display text-xl font-medium leading-tight tracking-tight">{title}</h1>
+            <p className="text-xs text-muted-foreground">{sub}</p>
           </div>
-          <div className="topbar-right">
-            <button
-              className="live-toggle"
+          <div className="flex items-center gap-2">
+            <Button
+              variant={store.live ? 'default' : 'outline'}
+              size="sm"
               onClick={() => store.setLive(!store.live)}
+              className="gap-2"
             >
-              <span className={`dot ${store.live ? 'live' : 'offline'}`} />
+              <StatusDot status={store.live ? 'live' : 'offline'} />
               {store.live ? 'Live' : 'Go live'}
-            </button>
-            <button className="btn btn-ghost btn-sm" onClick={store.resetDemo}>
+            </Button>
+            <Button variant="ghost" size="sm" onClick={store.resetDemo}>
               Reset demo
-            </button>
+            </Button>
           </div>
-        </div>
+        </header>
 
-        <div className="content">
+        <main className="flex-1 p-4 md:p-6">
           {view === 'overview' && <Overview store={store} />}
           {view === 'cameras' && <Cameras store={store} />}
           {view === 'integrations' && <Integrations store={store} />}
@@ -64,8 +77,9 @@ export default function App() {
           {view === 'runs' && <Runs store={store} />}
           {view === 'events' && <Events store={store} />}
           {view === 'testing' && <Testing />}
-        </div>
-      </div>
-    </div>
+        </main>
+      </SidebarInset>
+      <Toaster />
+    </SidebarProvider>
   )
 }

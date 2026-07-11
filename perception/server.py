@@ -26,7 +26,6 @@ from fastapi.responses import JSONResponse
 from . import emit as emit_mod
 from . import vlm as vlm_mod
 from .config import Config
-from .prompts import EVENT_TYPES
 from .sampler import Frame, sample_frames
 
 app = FastAPI(title="snowglobe perception detect API")
@@ -57,7 +56,7 @@ def health():
 @app.post("/detect")
 async def detect(
     file: UploadFile = File(...),
-    events: str = Form(",".join(EVENT_TYPES)),
+    events: str = Form(""),
     zone: str = Form("zone_a"),
     min_confidence: float = Form(0.5),
     mock: bool = Form(False),
@@ -67,9 +66,10 @@ async def detect(
     if frame_img is None:
         return JSONResponse(status_code=400, content={"error": "could not decode image"})
 
-    requested = [e.strip() for e in events.split(",") if e.strip() in EVENT_TYPES]
-    if not requested:
-        return JSONResponse(status_code=400, content={"error": "no valid event types"})
+    # Empty `events` → open-ended discovery. Otherwise targeted on the given
+    # (arbitrary, caller-defined) type slugs.
+    requested = [e.strip() for e in events.split(",") if e.strip()]
+    discovery = not requested
 
     detector, used_mock = _detector(mock)
     model_tag = "mock" if used_mock else _cfg.model
@@ -83,6 +83,35 @@ async def detect(
     frame = Frame(0, frame_img, ts, path, filename)
 
     verdicts, emitted = [], []
+
+    if discovery:
+        t = time.perf_counter()
+        try:
+            found = detector.discover(frame_img)
+        except Exception as e:
+            return JSONResponse(status_code=502, content={"error": f"discover failed: {e}"})
+        elapsed_ms = round((time.perf_counter() - t) * 1000)
+        for v in found:
+            verdicts.append(
+                {
+                    "event_type": v.event_type,
+                    "detected": v.detected,
+                    "confidence": round(v.confidence, 3),
+                    "count": v.count,
+                    "detail": v.detail,
+                    "elapsed_ms": elapsed_ms,
+                }
+            )
+            if v.confidence >= min_confidence:
+                emitted.append(
+                    emit_mod.build_event(
+                        v.event_type, v, zone, frame,
+                        snapshot_base_url=_cfg.snapshot_base_url, model=model_tag,
+                    )
+                )
+        return {"model": model_tag, "mock": used_mock, "mode": "discover",
+                "verdicts": verdicts, "events": emitted}
+
     for et in requested:
         t = time.perf_counter()
         try:
@@ -109,7 +138,7 @@ async def detect(
                 )
             )
 
-    return {"kind": "image", "model": model_tag, "mock": used_mock,
+    return {"kind": "image", "model": model_tag, "mock": used_mock, "mode": "targeted",
             "verdicts": verdicts, "events": emitted}
 
 
@@ -126,16 +155,17 @@ def _thumb(frame_img, width: int = 260) -> str:
 @app.post("/detect_video")
 async def detect_video(
     file: UploadFile = File(...),
-    events: str = Form(",".join(EVENT_TYPES)),
+    events: str = Form(""),
     zone: str = Form("zone_a"),
     min_confidence: float = Form(0.5),
     fps: float = Form(0.5),
     max_frames: int = Form(6),
     mock: bool = Form(False),
 ):
-    requested = [e.strip() for e in events.split(",") if e.strip() in EVENT_TYPES]
-    if not requested:
-        return JSONResponse(status_code=400, content={"error": "no valid event types"})
+    # Empty `events` → open-ended discovery. Otherwise targeted on the given
+    # (arbitrary, caller-defined) type slugs.
+    requested = [e.strip() for e in events.split(",") if e.strip()]
+    discovery = not requested
 
     # OpenCV needs a real file path, so buffer the upload to a temp file.
     raw = await file.read()
@@ -165,30 +195,48 @@ async def detect_video(
     detector, used_mock = _detector(mock)
     model_tag = "mock" if used_mock else _cfg.model
 
-    # Run every (frame, event_type) pair concurrently — otherwise a 6-frame clip
-    # with 4 event types is 24 sequential ~1.2s calls (~30s). Capped workers keep
-    # us under hosted rate limits.
-    def run_pair(fr, et):
-        return fr.seq, et, detector.detect(fr.image, et)
+    # Run every frame (and, in targeted mode, every event type) concurrently —
+    # otherwise a 6-frame clip is many sequential ~1.2s calls. Capped workers
+    # keep us under hosted rate limits.
+    if discovery:
+        def run_pair(fr, _et):
+            return fr.seq, None, detector.discover(fr.image)
+        jobs = [(fr, None) for fr in frames]
+    else:
+        def run_pair(fr, et):
+            return fr.seq, et, detector.detect(fr.image, et)
+        jobs = [(fr, et) for fr in frames for et in requested]
 
+    # In discovery mode the model names types itself, so verdicts are collected
+    # per frame as a list; in targeted mode we key by (frame, requested type).
     verdict_map: dict[tuple[int, str], object] = {}
+    discovered: dict[int, list] = {}
     with ThreadPoolExecutor(max_workers=4) as ex:
-        for fut in [ex.submit(run_pair, fr, et) for fr in frames for et in requested]:
+        for fut in [ex.submit(run_pair, fr, et) for fr, et in jobs]:
             try:
-                seq, et, v = fut.result()
-                verdict_map[(seq, et)] = v
+                seq, et, result = fut.result()
+                if discovery:
+                    discovered[seq] = result
+                else:
+                    verdict_map[(seq, et)] = result
             except Exception:
                 pass  # a failed call just leaves that (frame, event) missing
 
     frames_out = []
     for fr in frames:
         vs = []
-        for et in requested:
-            v = verdict_map.get((fr.seq, et))
-            if v is not None:
-                vs.append({"event_type": et, "detected": v.detected,
+        if discovery:
+            for v in discovered.get(fr.seq, []):
+                vs.append({"event_type": v.event_type, "detected": v.detected,
                            "confidence": round(v.confidence, 3),
                            "count": v.count, "detail": v.detail})
+        else:
+            for et in requested:
+                v = verdict_map.get((fr.seq, et))
+                if v is not None:
+                    vs.append({"event_type": et, "detected": v.detected,
+                               "confidence": round(v.confidence, 3),
+                               "count": v.count, "detail": v.detail})
         frames_out.append({
             "index": fr.seq,
             "t_sec": round(fr.seq / fps, 1) if fps else fr.seq,
@@ -198,9 +246,21 @@ async def detect_video(
 
     # Per event type: peak-confidence frame that cleared the threshold → one
     # representative event, so a clip yields a handful of events, not dozens.
+    # The set of types is whatever appeared (discovered or requested).
+    if discovery:
+        hits_by_type: dict[str, list] = {}
+        for seq, vs in discovered.items():
+            fr = next((f for f in frames if f.seq == seq), None)
+            for v in vs:
+                hits_by_type.setdefault(v.event_type, []).append((fr, v))
+    else:
+        hits_by_type = {
+            et: [(fr, verdict_map[(fr.seq, et)]) for fr in frames if (fr.seq, et) in verdict_map]
+            for et in requested
+        }
+
     summary, events_out = [], []
-    for et in requested:
-        hits = [(fr, verdict_map[(fr.seq, et)]) for fr in frames if (fr.seq, et) in verdict_map]
+    for et, hits in hits_by_type.items():
         detected = [(fr, v) for fr, v in hits if v.detected and v.confidence >= min_confidence]
         peak = max(detected, key=lambda x: x[1].confidence, default=None)
         summary.append({
@@ -220,6 +280,7 @@ async def detect_video(
 
     return {
         "kind": "video", "model": model_tag, "mock": used_mock,
+        "mode": "discover" if discovery else "targeted",
         "fps": fps, "frames_analyzed": len(frames),
         "frames": frames_out, "summary": summary, "events": events_out,
     }

@@ -10,6 +10,17 @@ import asyncio
 import json
 import os
 import uuid
+from pathlib import Path
+
+# Load automation/.env (H_AGENT_MODE, HAI_API_KEY, COMPOSIO_API_KEY, …) before
+# importing engine/steps, since some step modules read env at import time.
+# Absolute path so it works regardless of the launch directory.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent / ".env")
+except Exception:
+    pass  # python-dotenv not installed — rely on real env vars
 
 import jsonschema
 from fastapi import FastAPI, HTTPException

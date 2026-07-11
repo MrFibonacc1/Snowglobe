@@ -44,9 +44,10 @@ def render(value, event: dict):
 
 def matches(workflow: dict, event: dict) -> bool:
     t = workflow["trigger"]
+    type_ok = t["event_type"] == "*" or t["event_type"] == event["event_type"]
     return (
         workflow.get("enabled", False)
-        and t["event_type"] == event["event_type"]
+        and type_ok
         and (not t.get("zone") or t["zone"] == event["location"])
         and event["confidence"] >= t["min_confidence"]
     )

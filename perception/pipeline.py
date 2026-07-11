@@ -1,21 +1,23 @@
 """Wire sampler → detector → emitter together.
 
-Per-frame detectors (spill, person_count, safety_violation) each run their own
-VLM prompt. foot_traffic is DERIVED from person_count over a sliding time
-window rather than a separate per-frame call — that's what "traffic" actually
-means (throughput over time), and it avoids a redundant model call every
-second. A foot_traffic prompt still exists in prompts.py for anyone who wants
-per-frame throughput instead.
+Two modes:
+
+* DISCOVERY (default, `--events` empty): each sampled frame goes through one
+  open-ended VLM pass that surfaces any actionable events and names them
+  itself. Event types are not constrained to a fixed set.
+* TARGETED (`--events a,b,c`): each listed type (arbitrary, caller-defined) gets
+  its own yes/no VLM pass per frame. If `foot_traffic` is requested it is
+  DERIVED from `person_count` over a sliding window rather than a per-frame
+  call — that's what "traffic" means (throughput over time).
 """
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 
 from . import emit as emit_mod
 from . import sampler as sampler_mod
 from . import vlm as vlm_mod
-
-PER_FRAME_EVENTS = {"spill", "person_count", "safety_violation"}
 
 
 class TrafficAggregator:
@@ -58,7 +60,8 @@ def run(cfg, args) -> int:
     )
 
     events = [e.strip() for e in args.events.split(",") if e.strip()]
-    per_frame = [e for e in events if e in PER_FRAME_EVENTS]
+    discovery = not events  # no explicit types → open-ended discovery
+    per_frame = [e for e in events if e != "foot_traffic"]
     traffic = TrafficAggregator(args.traffic_window, args.fps) if "foot_traffic" in events else None
     # foot_traffic needs person counts to aggregate.
     if traffic and "person_count" not in per_frame:
@@ -66,9 +69,10 @@ def run(cfg, args) -> int:
 
     model_tag = "mock" if args.mock else cfg.model
     sink = f"dump→{args.dump}" if args.dump else f"POST→{args.automation_url}/events"
+    mode = "discover" if discovery else f"targeted={events}"
     print(
         f"perception: source={args.source} zone={args.zone} fps={args.fps} "
-        f"events={events} model={model_tag}\n            {sink}",
+        f"mode={mode} model={model_tag}\n            {sink}",
         file=sys.stderr,
     )
 
@@ -95,6 +99,27 @@ def run(cfg, args) -> int:
             save=not args.no_save,
         ):
             n_frames += 1
+
+            if discovery:
+                try:
+                    findings = detector.discover(frame.image)
+                except Exception as e:  # never let one bad call kill the loop
+                    print(f"  ! discover() failed: {e}", file=sys.stderr)
+                    findings = []
+                for verdict in findings:
+                    if verdict.confidence < args.min_confidence:
+                        continue
+                    if not cooled_down(verdict.event_type, frame.timestamp):
+                        continue
+                    event = emit_mod.build_event(
+                        verdict.event_type, verdict, args.zone, frame,
+                        snapshot_base_url=cfg.snapshot_base_url if not args.no_save else None,
+                        model=model_tag,
+                    )
+                    emitter.emit(event)
+                    _log_event(event, verdict)
+                continue
+
             for event_type in per_frame:
                 try:
                     verdict = detector.detect(frame.image, event_type)

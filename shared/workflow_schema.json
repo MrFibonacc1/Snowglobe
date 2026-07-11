@@ -14,7 +14,9 @@
       "properties": {
         "event_type": {
           "type": "string",
-          "enum": ["spill", "person_count", "foot_traffic", "safety_violation"]
+          "description": "Semantic event type slug to match (snake_case), or '*' to match any event type. Open-ended; not a fixed enum.",
+          "minLength": 1,
+          "pattern": "^(\\*|[a-z0-9]+(?:_[a-z0-9]+)*)$"
         },
         "zone": {
           "type": "string",

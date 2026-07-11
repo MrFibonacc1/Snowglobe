@@ -8,7 +8,7 @@ import type {
   Run,
   Workflow,
 } from './types'
-import { EVENT_TYPES, EVENT_META } from './constants'
+import { SUGGESTED_EVENT_TYPES, eventMeta } from './constants'
 import { api } from './api'
 import {
   integrationCatalog,
@@ -93,7 +93,7 @@ export function useStore() {
       const automations = s.automations.map((a) => {
         const match =
           a.enabled &&
-          a.trigger === event.event_type &&
+          (a.trigger === '*' || a.trigger === event.event_type) &&
           event.confidence >= a.minConfidence &&
           (!a.zone || a.zone === event.location)
         if (!match) return a
@@ -103,7 +103,7 @@ export function useStore() {
           automation: a.name,
           event_type: event.event_type,
           status: 'running',
-          detail: `${EVENT_META[event.event_type].label} in ${event.location} → ${a.actions.length} action(s)`,
+          detail: `${eventMeta(event.event_type).label} in ${event.location} → ${a.actions.length} action(s)`,
         })
         return { ...a, runs: a.runs + 1 }
       })
@@ -175,7 +175,7 @@ export function useStore() {
     }
 
     function simulate() {
-      const type = EVENT_TYPES[Math.floor(seededRandom() * EVENT_TYPES.length)]
+      const type = SUGGESTED_EVENT_TYPES[Math.floor(seededRandom() * SUGGESTED_EVENT_TYPES.length)]
       const zones = stateRef.current.cameras
         .filter((c) => c.status === 'live' && c.detects.includes(type))
         .map((c) => c.zone)
@@ -187,10 +187,9 @@ export function useStore() {
         timestamp: new Date().toISOString(),
         confidence: Number((0.65 + seededRandom() * 0.34).toFixed(2)),
         location,
-        payload:
-          type === 'person_count' || type === 'foot_traffic'
-            ? { count: Math.floor(5 + seededRandom() * 40) }
-            : { detail: 'Detected by Cosmos 3 Reasoner' },
+        payload: /count|traffic|crowd|queue/.test(type)
+          ? { count: Math.floor(5 + seededRandom() * 40) }
+          : { detail: 'Detected by the perception model' },
       })
     }
 

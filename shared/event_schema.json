@@ -11,7 +11,9 @@
     },
     "event_type": {
       "type": "string",
-      "enum": ["spill", "person_count", "foot_traffic", "safety_violation"]
+      "description": "Semantic, open-ended event type slug named by the perception model (snake_case), e.g. spill, blocked_exit, missing_ppe, overcrowding. Not a fixed enum.",
+      "minLength": 1,
+      "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$"
     },
     "timestamp": {
       "type": "string",

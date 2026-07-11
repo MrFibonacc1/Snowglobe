@@ -2,9 +2,40 @@ import { useEffect, useState } from 'react'
 import type { Store } from '../store'
 import type { AuthType, Integration, IntegrationCategory } from '../types'
 import { CATEGORY_LABEL } from '../constants'
-import { Modal } from '../components/Modal'
-import { IconPlus, IconCheck } from '../components/icons'
 import { api, type BackendStatus } from '../api'
+import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Field } from './Cameras'
+import { StatusDot } from '@/components/ui-kit'
+import type { ComponentType } from 'react'
+import {
+  Plus,
+  Check,
+  Bot,
+  Folder,
+  Sheet,
+  MessageSquare,
+  Volume2,
+  Link2,
+  Plug,
+} from 'lucide-react'
 
 // Integrations whose real state lives in automation/.env — when the backend
 // is reachable we show its truth and disable the local connect/disconnect.
@@ -27,13 +58,15 @@ const ENV_HINT: Record<string, string> = {
   gradium_voice: 'Set GRADIUM_API_KEY in automation/.env',
 }
 
-const LOGO: Record<string, string> = {
-  h_agent: '🤖',
-  gdrive: '📁',
-  gsheets: '📊',
-  slack: '💬',
-  gradium_voice: '🔊',
-  webhook: '🔗',
+type LogoIcon = ComponentType<{ className?: string; size?: number | string }>
+
+const LOGO: Record<string, LogoIcon> = {
+  h_agent: Bot,
+  gdrive: Folder,
+  gsheets: Sheet,
+  slack: MessageSquare,
+  gradium_voice: Volume2,
+  webhook: Link2,
 }
 
 const AUTH_COPY: Record<AuthType, { cta: string; field: string; placeholder: string }> = {
@@ -76,91 +109,99 @@ export function Integrations({ store }: { store: Store }) {
   const integrations = store.integrations.map(effective)
 
   return (
-    <div className="stack gap-16">
-      <div className="section-head">
-        <h2>Integrations</h2>
-        <span className="muted">
-          {integrations.filter((i) => i.status === 'connected').length} connected
-        </span>
-        <div className="spacer" />
-        <span className="badge">
-          <span className={`dot ${status ? 'live' : 'offline'}`} />
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="mr-auto flex items-baseline gap-2">
+          <h2 className="text-lg font-semibold">Integrations</h2>
+          <span className="text-sm text-muted-foreground">
+            {integrations.filter((i) => i.status === 'connected').length} connected
+          </span>
+        </div>
+        <Badge variant="outline" className="gap-1.5">
+          <StatusDot status={status ? 'live' : 'offline'} />
           {status ? 'live status from backend' : 'local demo state'}
-        </span>
-        <button className="btn btn-primary" onClick={() => setCreating(true)}>
-          <IconPlus size={16} /> Create integration
-        </button>
+        </Badge>
+        <Button onClick={() => setCreating(true)} className="gap-1.5">
+          <Plus className="size-4" /> Create integration
+        </Button>
       </div>
 
       {status && (
-        <div className="card" style={{ padding: '12px 16px' }}>
-          <div className="row wrap gap-6">
-            <span className="chip" style={{ color: 'var(--accent-2)' }}>
-              🤖 agent mode: {status.h_agent.mode}
-            </span>
-            <span className="chip">
-              NemoClaw {status.nemoclaw.active ? `→ ${status.nemoclaw.url}` : 'inactive'}
-            </span>
-            <span className="chip">{status.counts.workflows} workflows</span>
-            <span className="chip">{status.counts.events} events</span>
-            <span className="chip">{status.counts.runs} runs</span>
-          </div>
-        </div>
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-2 py-3 text-sm">
+            <Badge variant="secondary" className="gap-1">
+              <Bot className="size-3" /> agent mode: {status.h_agent.mode}
+            </Badge>
+            <Badge variant="outline">
+              NemoClaw {status.nemoclaw.active ? `-> ${status.nemoclaw.url}` : 'inactive'}
+            </Badge>
+            <Badge variant="outline">{status.counts.workflows} workflows</Badge>
+            <Badge variant="outline">{status.counts.events} events</Badge>
+            <Badge variant="outline">{status.counts.runs} runs</Badge>
+          </CardContent>
+        </Card>
       )}
 
-      <div className="grid grid-3">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {integrations.map((i) => {
+          const Logo = LOGO[i.id] ?? Plug
           const envManaged = Boolean(status && ENV_MANAGED[i.id])
           return (
-            <div className="int-card" key={i.id}>
-              <div className="int-top">
-                <div className="int-logo">{LOGO[i.id] ?? '🔌'}</div>
-                <div>
-                  <h3>{i.name}</h3>
-                  <div className="cat">{CATEGORY_LABEL[i.category]}</div>
+          <Card key={i.id}>
+            <CardContent className="flex flex-col gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex size-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <Logo className="size-5" />
                 </div>
-                <div className="spacer" style={{ flex: 1 }} />
+                <div className="min-w-0">
+                  <h3 className="truncate font-semibold">{i.name}</h3>
+                  <div className="text-xs text-muted-foreground">
+                    {CATEGORY_LABEL[i.category]}
+                  </div>
+                </div>
                 {i.status === 'connected' && (
-                  <span className="badge" style={{ color: 'var(--success)' }}>
-                    <IconCheck size={13} /> connected
-                  </span>
+                  <Badge variant="outline" className="ml-auto gap-1 border-emerald-500/40 text-emerald-500">
+                    <Check className="size-3" /> connected
+                  </Badge>
                 )}
               </div>
-              <div className="int-desc">{i.description}</div>
-              <div className="int-foot">
-                {i.accountLabel && <span className="chip">{i.accountLabel}</span>}
-                <div className="spacer" style={{ flex: 1 }} />
+              <p className="text-sm text-muted-foreground">{i.description}</p>
+              <div className="mt-1 flex items-center gap-2">
+                {i.accountLabel && <Badge variant="outline">{i.accountLabel}</Badge>}
                 {envManaged ? (
                   i.status === 'connected' ? (
-                    <span className="chip">env-managed</span>
+                    <Badge variant="secondary" className="ml-auto">env-managed</Badge>
                   ) : (
-                    <span className="chip" title={ENV_HINT[i.id]}>
+                    <span
+                      className="ml-auto text-xs text-muted-foreground"
+                      title={ENV_HINT[i.id]}
+                    >
                       {ENV_HINT[i.id]}
                     </span>
                   )
                 ) : i.status === 'connected' ? (
-                  <button
-                    className="btn btn-sm btn-ghost"
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto"
                     onClick={() => store.setIntegrationStatus(i.id, 'disconnected')}
                   >
                     Disconnect
-                  </button>
+                  </Button>
                 ) : (
-                  <button
-                    className="btn btn-sm btn-primary"
-                    onClick={() => setConnecting(i)}
-                  >
+                  <Button size="sm" className="ml-auto" onClick={() => setConnecting(i)}>
                     {AUTH_COPY[i.authType].cta}
-                  </button>
+                  </Button>
                 )}
               </div>
-            </div>
+            </CardContent>
+          </Card>
           )
         })}
       </div>
 
       {connecting && (
-        <ConnectModal
+        <ConnectDialog
           integration={connecting}
           onClose={() => setConnecting(null)}
           onConnect={(label) => {
@@ -171,7 +212,7 @@ export function Integrations({ store }: { store: Store }) {
       )}
 
       {creating && (
-        <CreateModal
+        <CreateDialog
           onClose={() => setCreating(false)}
           onCreate={(i) => {
             store.addIntegration(i)
@@ -183,7 +224,7 @@ export function Integrations({ store }: { store: Store }) {
   )
 }
 
-function ConnectModal({
+function ConnectDialog({
   integration,
   onClose,
   onConnect,
@@ -202,45 +243,43 @@ function ConnectModal({
       : value.trim()
 
   return (
-    <Modal
-      title={`Connect ${integration.name}`}
-      subtitle={integration.description}
-      onClose={onClose}
-      footer={
-        <>
-          <button className="btn btn-ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            className="btn btn-primary"
-            disabled={!valid}
-            style={{ opacity: valid ? 1 : 0.5 }}
-            onClick={() => valid && onConnect(labelFor())}
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Connect {integration.name}</DialogTitle>
+          <DialogDescription>{integration.description}</DialogDescription>
+        </DialogHeader>
+        <div className="py-2">
+          <Field
+            label={copy.field}
+            hint={
+              integration.authType === 'oauth'
+                ? 'In production this opens the provider OAuth screen via Composio.'
+                : 'Stored server-side by the automation service, never in the browser.'
+            }
           >
+            <Input
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder={copy.placeholder}
+              autoFocus
+            />
+          </Field>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button disabled={!valid} onClick={() => valid && onConnect(labelFor())}>
             {copy.cta}
-          </button>
-        </>
-      }
-    >
-      <div className="field">
-        <label>{copy.field}</label>
-        <input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder={copy.placeholder}
-          autoFocus
-        />
-        <span className="hint">
-          {integration.authType === 'oauth'
-            ? 'In production this opens the provider OAuth screen via Composio.'
-            : 'Stored server-side by the automation service — never in the browser.'}
-        </span>
-      </div>
-    </Modal>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
-function CreateModal({
+function CreateDialog({
   onClose,
   onCreate,
 }: {
@@ -254,19 +293,63 @@ function CreateModal({
   const valid = name.trim().length > 0
 
   return (
-    <Modal
-      title="Create integration"
-      subtitle="Register a new action target for your automations."
-      onClose={onClose}
-      footer={
-        <>
-          <button className="btn btn-ghost" onClick={onClose}>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Create integration</DialogTitle>
+          <DialogDescription>
+            Register a new action target for your automations.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-4 py-2">
+          <Field label="Name">
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Jira, Notion, PagerDuty"
+              autoFocus
+            />
+          </Field>
+          <Field label="Category">
+            <Select value={category} onValueChange={(v) => setCategory(v as IntegrationCategory)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(CATEGORY_LABEL).map(([k, v]) => (
+                  <SelectItem key={k} value={k}>
+                    {v}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Authentication">
+            <Select value={authType} onValueChange={(v) => setAuthType(v as AuthType)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="apikey">API key</SelectItem>
+                <SelectItem value="oauth">OAuth</SelectItem>
+                <SelectItem value="webhook">Webhook</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Description">
+            <Input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What this integration does"
+            />
+          </Field>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>
             Cancel
-          </button>
-          <button
-            className="btn btn-primary"
+          </Button>
+          <Button
             disabled={!valid}
-            style={{ opacity: valid ? 1 : 0.5 }}
             onClick={() =>
               valid &&
               onCreate({
@@ -274,57 +357,14 @@ function CreateModal({
                 category,
                 authType,
                 status: 'disconnected',
-                description:
-                  description.trim() || 'Custom integration target.',
+                description: description.trim() || 'Custom integration target.',
               })
             }
           >
             Create
-          </button>
-        </>
-      }
-    >
-      <div className="field">
-        <label>Name</label>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Jira, Notion, PagerDuty"
-          autoFocus
-        />
-      </div>
-      <div className="field">
-        <label>Category</label>
-        <select
-          value={category}
-          onChange={(e) => setCategory(e.target.value as IntegrationCategory)}
-        >
-          {Object.entries(CATEGORY_LABEL).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="field">
-        <label>Authentication</label>
-        <select
-          value={authType}
-          onChange={(e) => setAuthType(e.target.value as AuthType)}
-        >
-          <option value="apikey">API key</option>
-          <option value="oauth">OAuth</option>
-          <option value="webhook">Webhook</option>
-        </select>
-      </div>
-      <div className="field">
-        <label>Description</label>
-        <input
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="What this integration does"
-        />
-      </div>
-    </Modal>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -1,9 +1,24 @@
 import { useState } from 'react'
 import type { Store } from '../store'
 import type { Camera, CameraSource, EventType } from '../types'
-import { EVENT_META, EVENT_TYPES, SOURCE_LABEL } from '../constants'
-import { Modal } from '../components/Modal'
-import { IconPlus, IconTrash, IconCamera } from '../components/icons'
+import { SUGGESTED_EVENT_TYPES, eventMeta, SOURCE_LABEL } from '../constants'
+import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Slider } from '@/components/ui/slider'
+import { Badge } from '@/components/ui/badge'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { StatusDot, EventIcon } from '../components/ui-kit'
+import { cn } from '@/lib/utils'
+import { Plus, Trash2, Camera as CameraIcon } from 'lucide-react'
 
 const SOURCES: { id: CameraSource; d: string }[] = [
   { id: 'webcam', d: 'This machine' },
@@ -16,23 +31,23 @@ export function Cameras({ store }: { store: Store }) {
   const [adding, setAdding] = useState(false)
 
   return (
-    <div className="stack gap-16">
-      <div className="section-head">
-        <h2>Cameras</h2>
-        <span className="muted">{store.cameras.length} connected</span>
-        <div className="spacer" />
-        <button className="btn btn-primary" onClick={() => setAdding(true)}>
-          <IconPlus size={16} /> Connect camera
-        </button>
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="mr-auto flex items-baseline gap-2">
+          <h2 className="text-lg font-semibold">Cameras</h2>
+          <span className="text-sm text-muted-foreground">{store.cameras.length} connected</span>
+        </div>
+        <Button onClick={() => setAdding(true)} className="gap-1.5">
+          <Plus className="size-4" /> Connect camera
+        </Button>
       </div>
 
       {store.cameras.length === 0 ? (
-        <div className="empty">
-          No cameras yet. Connect a webcam, RTSP feed, or clip to start
-          producing events.
-        </div>
+        <EmptyState>
+          No cameras yet. Connect a webcam, RTSP feed, or clip to start producing events.
+        </EmptyState>
       ) : (
-        <div className="grid grid-3">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {store.cameras.map((cam) => (
             <CameraCard key={cam.id} cam={cam} store={store} />
           ))}
@@ -40,7 +55,7 @@ export function Cameras({ store }: { store: Store }) {
       )}
 
       {adding && (
-        <AddCameraModal
+        <AddCameraDialog
           onClose={() => setAdding(false)}
           onAdd={(c) => {
             store.addCamera(c)
@@ -48,6 +63,14 @@ export function Cameras({ store }: { store: Store }) {
           }}
         />
       )}
+    </div>
+  )
+}
+
+function EmptyState({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">
+      {children}
     </div>
   )
 }
@@ -61,68 +84,74 @@ function CameraCard({ cam, store }: { cam: Camera; store: Store }) {
   )?.snapshot_url
 
   return (
-    <div className="cam-card">
-      <div className="cam-preview">
+    <Card className="overflow-hidden pt-0">
+      <div className="relative flex h-36 items-center justify-center overflow-hidden bg-gradient-to-br from-muted to-background text-muted-foreground">
         {snap && !snapBroken && (
           <img
-            className="cam-snap"
             src={snap}
             alt=""
+            className="absolute inset-0 h-full w-full object-cover"
             onError={() => setSnapBroken(true)}
           />
         )}
-        {cam.status === 'live' && <div className="scan" />}
-        <div className="live-tag">
-          <span className="badge">
-            <span className={`dot ${cam.status}`} />
+        {cam.status === 'live' && (
+          <div className="absolute inset-x-0 top-0 h-full w-full animate-pulse bg-[linear-gradient(transparent,transparent_50%,rgba(255,255,255,0.03)_50%)] bg-[length:100%_8px]" />
+        )}
+        <div className="absolute left-3 top-3">
+          <Badge variant="secondary" className="gap-1.5 capitalize">
+            <StatusDot status={cam.status} />
             {cam.status}
-          </span>
+          </Badge>
         </div>
-        {(!snap || snapBroken) && <IconCamera size={30} />}
-        <div className="fps-tag">{cam.fps} fps</div>
+        {(!snap || snapBroken) && <CameraIcon className="size-8 opacity-40" />}
+        <div className="absolute bottom-3 right-3 rounded bg-background/70 px-1.5 py-0.5 text-xs tabular-nums">
+          {cam.fps} fps
+        </div>
       </div>
-      <div className="cam-body">
-        <div className="cam-title">
-          <h3>{cam.name}</h3>
+      <CardContent className="flex flex-col gap-3">
+        <h3 className="font-semibold">{cam.name}</h3>
+        <div className="flex flex-wrap gap-1.5">
+          <Badge variant="outline">{cam.zone}</Badge>
+          <Badge variant="outline">{SOURCE_LABEL[cam.source]}</Badge>
+          <Badge variant="outline">{cam.eventsToday} events today</Badge>
         </div>
-        <div className="cam-meta">
-          <span className="chip">{cam.zone}</span>
-          <span className="chip">{SOURCE_LABEL[cam.source]}</span>
-          <span className="chip">{cam.eventsToday} events today</span>
-        </div>
-        <div className="cam-meta">
+        <div className="flex flex-wrap gap-1.5">
+          {cam.detects.length === 0 && (
+            <Badge variant="secondary" className="gap-1">
+              <EventIcon type="*" className="size-3" /> Discover events
+            </Badge>
+          )}
           {cam.detects.map((d) => (
-            <span
+            <Badge
               key={d}
-              className="chip"
-              style={{ color: EVENT_META[d].color }}
+              variant="outline"
+              className="gap-1"
+              style={{ color: eventMeta(d).color, borderColor: `${eventMeta(d).color}40` }}
             >
-              {EVENT_META[d].icon} {EVENT_META[d].label}
-            </span>
+              <EventIcon type={d} className="size-3" /> {eventMeta(d).label}
+            </Badge>
           ))}
         </div>
-        <div className="cam-foot">
-          <button
-            className="btn btn-sm"
-            onClick={() => store.toggleCamera(cam.id)}
-          >
+        <div className="mt-1 flex items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={() => store.toggleCamera(cam.id)}>
             {cam.status === 'live' ? 'Pause' : 'Resume'}
-          </button>
-          <div className="spacer" style={{ flex: 1 }} />
-          <button
-            className="btn btn-danger btn-sm"
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="ml-auto text-muted-foreground hover:text-destructive"
             onClick={() => store.removeCamera(cam.id)}
             aria-label="Remove camera"
           >
-            <IconTrash size={15} />
-          </button>
+            <Trash2 className="size-4" />
+          </Button>
         </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
-function AddCameraModal({
+function AddCameraDialog({
   onClose,
   onAdd,
 }: {
@@ -133,7 +162,8 @@ function AddCameraModal({
   const [zone, setZone] = useState('zone_a')
   const [source, setSource] = useState<CameraSource>('rtsp')
   const [url, setUrl] = useState('')
-  const [detects, setDetects] = useState<EventType[]>(['person_count', 'spill'])
+  const [detects, setDetects] = useState<EventType[]>([])
+  const [customType, setCustomType] = useState('')
 
   const needsUrl = source === 'rtsp' || source === 'hls'
   const valid = name.trim() && zone.trim() && (!needsUrl || url.trim())
@@ -141,20 +171,112 @@ function AddCameraModal({
   const toggle = (t: EventType) =>
     setDetects((d) => (d.includes(t) ? d.filter((x) => x !== t) : [...d, t]))
 
+  const addCustom = () => {
+    const slug = customType
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+    if (slug && !detects.includes(slug)) setDetects((d) => [...d, slug])
+    setCustomType('')
+  }
+
   return (
-    <Modal
-      title="Connect a camera"
-      subtitle="Add a video source. Detections stream into the event feed at the sampled frame rate."
-      onClose={onClose}
-      footer={
-        <>
-          <button className="btn btn-ghost" onClick={onClose}>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Connect a camera</DialogTitle>
+          <DialogDescription>
+            Add a video source. Detections stream into the event feed at the sampled frame rate.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-4 py-2">
+          <div className="flex flex-col gap-2">
+            <Label>Source type</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {SOURCES.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={cn(
+                    'rounded-lg border p-3 text-left transition-colors',
+                    source === s.id
+                      ? 'border-primary bg-primary/10'
+                      : 'hover:bg-accent',
+                  )}
+                  onClick={() => setSource(s.id)}
+                >
+                  <div className="text-sm font-medium">{SOURCE_LABEL[s.id]}</div>
+                  <div className="text-xs text-muted-foreground">{s.d}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <Field label="Camera name">
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Loading Bay East"
+              autoFocus
+            />
+          </Field>
+
+          {needsUrl && (
+            <Field
+              label="Stream URL"
+              hint="Perception samples this feed at 1 fps and sends frames to the Cosmos 3 Reasoner."
+            >
+              <Input
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder={source === 'rtsp' ? 'rtsp://10.0.0.20/stream1' : 'https://…/index.m3u8'}
+              />
+            </Field>
+          )}
+
+          <Field label="Zone" hint="Used to route events to zone-scoped automations.">
+            <Input value={zone} onChange={(e) => setZone(e.target.value)} placeholder="zone_a" />
+          </Field>
+
+          <div className="flex flex-col gap-2">
+            <Label>Watch for specific events (optional)</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {[...new Set([...SUGGESTED_EVENT_TYPES, ...detects])].map((t) => (
+                <PillToggle key={t} selected={detects.includes(t)} onClick={() => toggle(t)}>
+                  <EventIcon type={t} className="size-3.5" /> {eventMeta(t).label}
+                </PillToggle>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                value={customType}
+                onChange={(e) => setCustomType(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    addCustom()
+                  }
+                }}
+                placeholder="add a custom event, e.g. blocked_exit"
+              />
+              <Button type="button" variant="secondary" onClick={addCustom}>
+                Add
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Leave empty for open-ended discovery — the perception model
+              surfaces and names any actionable event on its own.
+            </p>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>
             Cancel
-          </button>
-          <button
-            className="btn btn-primary"
+          </Button>
+          <Button
             disabled={!valid}
-            style={{ opacity: valid ? 1 : 0.5 }}
             onClick={() =>
               valid &&
               onAdd({
@@ -169,74 +291,55 @@ function AddCameraModal({
             }
           >
             Connect
-          </button>
-        </>
-      }
-    >
-      <div className="field">
-        <label>Source type</label>
-        <div className="source-grid">
-          {SOURCES.map((s) => (
-            <button
-              key={s.id}
-              className={`source-opt ${source === s.id ? 'sel' : ''}`}
-              onClick={() => setSource(s.id)}
-            >
-              <span className="t">{SOURCE_LABEL[s.id]}</span>
-              <span className="d">{s.d}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="field">
-        <label>Camera name</label>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Loading Bay East"
-          autoFocus
-        />
-      </div>
-
-      {needsUrl && (
-        <div className="field">
-          <label>Stream URL</label>
-          <input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder={source === 'rtsp' ? 'rtsp://10.0.0.20/stream1' : 'https://…/index.m3u8'}
-          />
-          <span className="hint">
-            Perception samples this feed at 1 fps and sends frames to the Cosmos 3 Reasoner.
-          </span>
-        </div>
-      )}
-
-      <div className="field">
-        <label>Zone</label>
-        <input
-          value={zone}
-          onChange={(e) => setZone(e.target.value)}
-          placeholder="zone_a"
-        />
-        <span className="hint">Used to route events to zone-scoped automations.</span>
-      </div>
-
-      <div className="field">
-        <label>Detect</label>
-        <div className="check-row">
-          {EVENT_TYPES.map((t) => (
-            <button
-              key={t}
-              className={`pill-check ${detects.includes(t) ? 'sel' : ''}`}
-              onClick={() => toggle(t)}
-            >
-              {EVENT_META[t].icon} {EVENT_META[t].label}
-            </button>
-          ))}
-        </div>
-      </div>
-    </Modal>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
+
+export function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string
+  hint?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <Label>{label}</Label>
+      {children}
+      {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
+    </div>
+  )
+}
+
+export function PillToggle({
+  selected,
+  onClick,
+  children,
+}: {
+  selected: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'inline-flex items-center gap-1 rounded-none border px-3 py-1 text-xs font-medium transition-colors',
+        selected
+          ? 'border-primary bg-primary/15 text-foreground'
+          : 'text-muted-foreground hover:bg-accent',
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+// re-export Slider for pages that want the shared field styling
+export { Slider }

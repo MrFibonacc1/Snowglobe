@@ -30,6 +30,9 @@ import time
 
 import httpx
 
+# Read at import time for backwards-compatible module-level access, but the
+# execute() path re-reads it so a .env loaded after import (see main.py) still
+# takes effect.
 MODE = os.environ.get("H_AGENT_MODE", "mock")
 
 # Agent API (Computer-Use Agents). EU by default; US via HAI_AGENT_REGION=us.
@@ -49,11 +52,12 @@ _RUNNING = {"pending", "running", "starting", "queued", "initializing", "created
 
 
 def execute(config: dict, event: dict) -> dict:
-    if MODE == "agent_api":
+    mode = os.environ.get("H_AGENT_MODE", MODE)
+    if mode == "agent_api":
         return _run_agent_api(config)
-    if MODE == "nemoclaw":
+    if mode == "nemoclaw":
         return _run_nemoclaw(config)
-    if MODE == "surfer_cli":
+    if mode == "surfer_cli":
         from steps import h_agent_surfer_legacy  # deferred: heavy/optional
         return h_agent_surfer_legacy.run(config)
     return _mock(config)

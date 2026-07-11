@@ -1,38 +1,44 @@
 import type { Store } from '../store'
 import type { Run, RunStep } from '../types'
-import { EVENT_META } from '../constants'
+import { eventMeta } from '../constants'
 import { timeAgo } from '../util'
-import { IconCheck, IconArrow } from '../components/icons'
+import { Card, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { StatusDot, EventIcon } from '../components/ui-kit'
+import { cn } from '@/lib/utils'
+import { Check, Loader2, ExternalLink } from 'lucide-react'
 
 export function Runs({ store }: { store: Store }) {
   const runs = store.runs
 
   return (
-    <div className="stack gap-16">
+    <div className="flex flex-col gap-6">
       {store.backendOnline === false && (
-        <div className="banner warn">
-          Automation backend unreachable — no live runs. Start it with{' '}
-          <code>uvicorn main:app --port 8000</code>, then Go live.
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          Automation backend unreachable. No live runs. Start it with{' '}
+          <code className="rounded bg-background/50 px-1">uvicorn main:app --port 8000</code>, then
+          Go live.
         </div>
       )}
 
-      <div className="section-head">
-        <h2>Runs</h2>
-        <span className="muted">{runs.length} recent</span>
-        <div className="spacer" />
-        <span className="badge">
-          <span className={`dot ${store.live ? 'live' : 'offline'}`} />
-          {store.live ? 'polling /runs' : 'paused — Go live'}
-        </span>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="mr-auto flex items-baseline gap-2">
+          <h2 className="text-lg font-semibold">Runs</h2>
+          <span className="text-sm text-muted-foreground">{runs.length} recent</span>
+        </div>
+        <Badge variant="secondary" className="gap-1.5">
+          <StatusDot status={store.live ? 'live' : 'offline'} />
+          {store.live ? 'polling /runs' : 'paused, Go live'}
+        </Badge>
       </div>
 
       {runs.length === 0 ? (
-        <div className="empty">
-          No runs yet. Go live and trigger a workflow (or use its <b>Test</b>{' '}
-          button) to watch steps execute here in real time.
+        <div className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">
+          No runs yet. Go live and trigger a workflow (or use its <b>Test</b> button) to watch steps
+          execute here in real time.
         </div>
       ) : (
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))' }}>
+        <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           {runs.map((run) => (
             <RunCard key={run.id} run={run} />
           ))}
@@ -43,88 +49,122 @@ export function Runs({ store }: { store: Store }) {
 }
 
 function RunCard({ run }: { run: Run }) {
-  const m = EVENT_META[run.event.event_type]
+  const m = eventMeta(run.event.event_type)
   return (
-    <div className="run-card">
-      <div className="row between">
-        <div className="row gap-6">
-          <span className="feed-ico">{m?.icon ?? '•'}</span>
-          <div>
-            <div className="feed-title">{run.workflow_name ?? run.workflow_id}</div>
-            <div className="feed-sub">
-              {m?.label ?? run.event.event_type} in {run.event.location}
-              {' · '}
-              {Math.round(run.event.confidence * 100)}%
+    <Card>
+      <CardContent className="flex flex-col gap-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted" style={{ color: m?.color }}>
+              <EventIcon type={run.event.event_type} className="size-4" />
+            </span>
+            <div>
+              <div className="text-sm font-semibold">{run.workflow_name ?? run.workflow_id}</div>
+              <div className="text-xs text-muted-foreground">
+                {m?.label ?? run.event.event_type} in {run.event.location} ·{' '}
+                {Math.round(run.event.confidence * 100)}%
+              </div>
             </div>
           </div>
+          <RunStatusBadge status={run.status} />
         </div>
-        <span className={`run-status ${run.status}`}>{run.status}</span>
-      </div>
 
-      <div className="timeline">
-        {run.steps.map((step, i) => (
-          <StepRow key={step.id} step={step} last={i === run.steps.length - 1} />
-        ))}
-      </div>
+        <div className="flex flex-col gap-0">
+          {run.steps.map((step, i) => (
+            <StepRow key={step.id} step={step} last={i === run.steps.length - 1} />
+          ))}
+        </div>
 
-      <div className="row between">
-        <span className="feed-time">
-          {run.started_at ? timeAgo(run.started_at) : ''}
-        </span>
-        <span className="faint" style={{ fontFamily: 'monospace', fontSize: 11 }}>
-          {run.id}
-        </span>
-      </div>
-    </div>
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>{run.started_at ? timeAgo(run.started_at) : ''}</span>
+          <span className="font-mono opacity-60">{run.id}</span>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
-function StepRow({ step }: { step: RunStep; last: boolean }) {
+function RunStatusBadge({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    running: 'border-primary/40 text-primary',
+    done: 'border-emerald-500/40 text-emerald-500',
+    failed: 'border-destructive/40 text-destructive',
+  }
+  return (
+    <Badge variant="outline" className={cn('capitalize', map[status])}>
+      {status}
+    </Badge>
+  )
+}
+
+function StepRow({ step, last }: { step: RunStep; last: boolean }) {
   const out = step.output ?? {}
   const replay = (out.agent_view_url as string) || (out.replay_url as string) || null
   return (
-    <div className="tl-step">
-      <div className="tl-marker">
-        {step.status === 'running' ? (
-          <div className="spinner" style={{ margin: 0 }} />
-        ) : step.status === 'done' ? (
-          <span className="check" style={{ margin: 0 }}>
-            <IconCheck size={14} />
-          </span>
-        ) : (
-          <span className={`tl-dot ${step.status}`} />
-        )}
+    <div className="flex gap-3">
+      <div className="flex flex-col items-center">
+        <StepMarker status={step.status} />
+        {!last && <span className="w-px flex-1 bg-border" />}
       </div>
-      <div className="tl-body">
-        <div className="tl-title">
+      <div className="flex-1 pb-4">
+        <div className="text-sm font-medium">
           {step.type}
           {step.status === 'skipped' && (
-            <span className="faint" style={{ fontWeight: 400 }}> · skipped</span>
+            <span className="font-normal text-muted-foreground"> · skipped</span>
           )}
           {step.status === 'failed' && (
-            <span style={{ color: 'var(--danger)', fontWeight: 400 }}> · failed</span>
+            <span className="font-normal text-destructive"> · failed</span>
           )}
         </div>
         <StepDetail step={step} />
         {replay && (
-          <a className="replay-link" href={replay} target="_blank" rel="noreferrer">
-            <IconArrow size={12} /> View agent replay
+          <a
+            className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+            href={replay}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <ExternalLink className="size-3" /> View agent replay
           </a>
         )}
       </div>
-      <div className="feed-time">
+      <div className="pt-0.5 text-xs text-muted-foreground">
         {step.finished_at && step.started_at
-          ? `${durationMs(step.started_at, step.finished_at)}`
+          ? durationMs(step.started_at, step.finished_at)
           : ''}
       </div>
     </div>
   )
 }
 
+function StepMarker({ status }: { status: string }) {
+  if (status === 'running')
+    return (
+      <span className="flex size-5 items-center justify-center">
+        <Loader2 className="size-4 animate-spin text-primary" />
+      </span>
+    )
+  if (status === 'done')
+    return (
+      <span className="flex size-5 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-500">
+        <Check className="size-3" />
+      </span>
+    )
+  const color =
+    status === 'failed' ? 'bg-destructive' : status === 'skipped' ? 'bg-muted-foreground/40' : 'bg-muted-foreground/60'
+  return (
+    <span className="flex size-5 items-center justify-center">
+      <span className={cn('size-2 rounded-full', color)} />
+    </span>
+  )
+}
+
 function StepDetail({ step }: { step: RunStep }) {
   const out = (step.output ?? {}) as Record<string, unknown>
-  if (step.status === 'pending') return <div className="tl-sub">waiting…</div>
-  if (out.error) return <div className="tl-sub" style={{ color: 'var(--danger)' }}>{String(out.error)}</div>
+  if (step.status === 'pending')
+    return <div className="text-xs text-muted-foreground">waiting…</div>
+  if (out.error)
+    return <div className="text-xs text-destructive">{String(out.error)}</div>
 
   if (step.type === 'h_agent') {
     // The agent's actual answer is the most useful thing to show.
@@ -140,23 +180,28 @@ function StepDetail({ step }: { step: RunStep }) {
     if (out.backend) bits.push(String(out.backend))
     if (out.task) bits.push(String(out.task))
     if (out.status || out.state) bits.push(`status ${out.status ?? out.state}`)
-    if (out.summary) return <div className="tl-sub">{String(out.summary)}</div>
-    return <div className="tl-sub">{bits.join(' · ') || 'agent run'}</div>
+    if (out.summary) return <div className="text-xs text-muted-foreground">{String(out.summary)}</div>
+    return <div className="text-xs text-muted-foreground">{bits.join(' · ') || 'agent run'}</div>
   }
   if (step.type === 'composio') {
     const stub = out.stubbed ? ' (stubbed)' : ''
-    return <div className="tl-sub">{String(out.action ?? 'composio')}{stub}</div>
+    return (
+      <div className="text-xs text-muted-foreground">
+        {String(out.action ?? 'composio')}
+        {stub}
+      </div>
+    )
   }
   if (step.type === 'condition') {
     return (
-      <div className="tl-sub">
+      <div className="text-xs text-muted-foreground">
         {out.expression ? String(out.expression) : 'condition'}
         {out.passed === false ? ' → false (stopped)' : out.passed === true ? ' → true' : ''}
       </div>
     )
   }
   if (step.type === 'voice') {
-    return <div className="tl-sub">{out.text ? String(out.text) : 'voice'}</div>
+    return <div className="text-xs text-muted-foreground">{out.text ? String(out.text) : 'voice'}</div>
   }
   if (step.type === 'mcp') {
     return (

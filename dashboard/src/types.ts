@@ -1,10 +1,10 @@
 // Mirrors shared/event_schema.json plus dashboard-only config entities.
 
-export type EventType =
-  | 'spill'
-  | 'person_count'
-  | 'foot_traffic'
-  | 'safety_violation'
+// Event types are open-ended: the perception model names them semantically
+// (snake_case slugs like 'spill', 'blocked_exit', 'missing_ppe'), so this is a
+// plain string rather than a fixed union. The dashboard derives a label, color
+// and icon for any type at runtime (see constants.ts `eventMeta`).
+export type EventType = string
 
 export type CameraSource = 'webcam' | 'rtsp' | 'file' | 'hls'
 export type CameraStatus = 'live' | 'connecting' | 'offline'

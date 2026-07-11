@@ -31,8 +31,8 @@ WORKFLOWS = [
                 "config": {
                     "action": "slack_message",
                     "channel": "#facilities-alerts",
-                    "text": "🚨 Spill detected in {{event.location}} "
-                            "(confidence {{event.confidence}}) — incident filed.",
+                    "text": "Spill detected in {{event.location}} "
+                            "(confidence {{event.confidence}}), incident filed.",
                 },
             },
         ],
@@ -58,8 +58,8 @@ WORKFLOWS = [
                 "config": {
                     "action": "slack_message",
                     "channel": "#facilities-alerts",
-                    "text": "👥 {{event.payload.count}} people in "
-                            "{{event.location}} — over capacity.",
+                    "text": "{{event.payload.count}} people in "
+                            "{{event.location}}, over capacity.",
                 },
             },
         ],
