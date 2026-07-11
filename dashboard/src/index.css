@@ -816,6 +816,36 @@ input, select, textarea {
   max-height: 280px;
   margin: 0;
 }
+.frame-strip {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+.frame-thumb {
+  flex: 0 0 auto;
+  width: 132px;
+}
+.frame-thumb img {
+  width: 132px;
+  height: 78px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  display: block;
+}
+.frame-cap {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 4px;
+}
+.frame-badges {
+  display: flex;
+  gap: 4px;
+  font-size: 13px;
+  min-height: 18px;
+  margin-top: 2px;
+}
 
 /* ---- Workflow builder ---- */
 .field textarea {
