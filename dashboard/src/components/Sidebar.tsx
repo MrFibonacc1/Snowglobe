@@ -50,7 +50,7 @@ export function Sidebar({ view, onChange, counts }: Props) {
           </svg>
         </div>
         <div>
-          <div className="brand-name">PalantirV2</div>
+          <div className="brand-name">Snowglobe</div>
           <div className="brand-sub">Console</div>
         </div>
       </div>

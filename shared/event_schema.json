@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "PalantirV2 Event",
+  "title": "Snowglobe Event",
   "description": "The contract between perception/ and automation/. Freeze early; extend payload, not the envelope.",
   "type": "object",
   "required": ["event_id", "event_type", "timestamp", "confidence", "location"],

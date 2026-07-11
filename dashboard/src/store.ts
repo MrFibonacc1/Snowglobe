@@ -14,7 +14,7 @@ import {
   seedEvents,
 } from './mockData'
 
-const KEY = 'palantirv2.state.v1'
+const KEY = 'snowglobe.state.v1'
 const AUTOMATION_URL = import.meta.env.VITE_AUTOMATION_URL as string | undefined
 
 interface PersistedState {

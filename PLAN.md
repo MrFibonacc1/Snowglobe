@@ -1,4 +1,4 @@
-# palantirV2 — Project Plan (v2, 3-person split)
+# Snowglobe — Project Plan (v2, 3-person split)
 
 **Ambient perception → agentic action.** Cameras watch a physical space.
 **NVIDIA Cosmos 3's Reasoner** (Super where we have the compute, Nano via the
@@ -70,7 +70,7 @@ Built at The Computer Use Hackathon (H Company / NVIDIA / Accel), Jul 11–12 20
 ## Repo layout
 
 ```
-palantirV2/
+snowglobe/
   perception/    # Python: sampler → Cosmos 3 Reasoner → events           (Person A)
   automation/    # Python/FastAPI: workflow engine + OpenClaw + Composio  (Person B)
   dashboard/     # React: console + workflow builder UI  [BUILT — extend] (Person C)

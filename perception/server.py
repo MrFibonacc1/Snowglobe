@@ -26,7 +26,7 @@ from .config import Config
 from .prompts import EVENT_TYPES
 from .sampler import Frame
 
-app = FastAPI(title="palantirV2 perception detect API")
+app = FastAPI(title="snowglobe perception detect API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

@@ -44,7 +44,7 @@ export const integrationCatalog: Integration[] = [
     description:
       'Runner H / Surfer H computer-use agent. Navigates UIs and fills forms.',
     authType: 'apikey',
-    accountLabel: 'team@palantirv2.dev',
+    accountLabel: 'team@snowglobe.dev',
   },
   {
     id: 'gdrive',
@@ -53,7 +53,7 @@ export const integrationCatalog: Integration[] = [
     status: 'connected',
     description: 'File snapshots and reports to Drive (via Composio).',
     authType: 'oauth',
-    accountLabel: 'ops@palantirv2.dev',
+    accountLabel: 'ops@snowglobe.dev',
   },
   {
     id: 'gsheets',

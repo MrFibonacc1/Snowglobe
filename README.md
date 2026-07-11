@@ -1,4 +1,4 @@
-# palantirV2
+# Snowglobe
 
 Ambient perception → agentic action. A camera watches a space, NVIDIA's
 Cosmos 3 Reasoner turns frames into structured events — spills, occupancy,

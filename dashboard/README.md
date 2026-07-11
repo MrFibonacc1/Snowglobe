@@ -1,6 +1,6 @@
 # dashboard
 
-The PalantirV2 console — a single-page app to connect cameras, manage
+The Snowglobe console — a single-page app to connect cameras, manage
 integrations, wire up automations, and watch the live event feed and agent
 activity.
 

@@ -1,4 +1,4 @@
-"""PalantirV2 automation service.
+"""Snowglobe automation service.
 
 Run from this directory:  uvicorn main:app --port 8000 --reload
 API contract: PLAN.md §Data contracts.
@@ -23,7 +23,7 @@ with open(os.path.join(_SHARED, "event_schema.json")) as f:
 with open(os.path.join(_SHARED, "workflow_schema.json")) as f:
     WORKFLOW_SCHEMA = json.load(f)
 
-app = FastAPI(title="palantirV2 automation")
+app = FastAPI(title="snowglobe automation")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # hackathon: dashboard on :5173

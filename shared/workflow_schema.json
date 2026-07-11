@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "PalantirV2 Workflow",
+  "title": "Snowglobe Workflow",
   "description": "The contract between the dashboard workflow builder and the automation engine. {{event.*}} placeholders in step config strings are resolved against the triggering event before execution.",
   "type": "object",
   "required": ["id", "name", "enabled", "trigger", "steps"],

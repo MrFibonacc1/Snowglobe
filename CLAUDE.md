@@ -1,4 +1,4 @@
-# palantirV2 — Agent Context
+# Snowglobe — Agent Context
 
 Hackathon project (Computer Use Hackathon, 48h). Cameras → NVIDIA Cosmos 3
 Reasoner detections → structured events → custom workflow engine → H Company agents
