@@ -24,5 +24,6 @@ team split.
 ## Pipeline
 
 video → frame sampler (1 fps) → Nemotron VL via NIM → event normalizer →
-`POST /events` → trigger engine (dedup/cooldown) → OpenClaw orchestrator →
-H agent / Composio actions → dashboard.
+`POST /events` → workflow engine (trigger match, dedup/cooldown) → workflow
+steps: H agents via OpenClaw (forms, tickets) + Composio (Drive/Sheets/Slack)
+→ live runs view in the dashboard.

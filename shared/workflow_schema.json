@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PalantirV2 Workflow",
+  "description": "The contract between the dashboard workflow builder and the automation engine. {{event.*}} placeholders in step config strings are resolved against the triggering event before execution.",
+  "type": "object",
+  "required": ["id", "name", "enabled", "trigger", "steps"],
+  "properties": {
+    "id": { "type": "string" },
+    "name": { "type": "string" },
+    "enabled": { "type": "boolean" },
+    "trigger": {
+      "type": "object",
+      "required": ["event_type", "min_confidence", "cooldown_sec"],
+      "properties": {
+        "event_type": {
+          "type": "string",
+          "enum": ["spill", "person_count", "foot_traffic", "safety_violation"]
+        },
+        "zone": {
+          "type": "string",
+          "description": "Optional; omit to match any zone"
+        },
+        "min_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "cooldown_sec": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Dedup window: max one run per (workflow, zone) per window"
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "config"],
+        "properties": {
+          "id": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": ["h_agent", "composio", "condition", "voice"]
+          },
+          "config": {
+            "type": "object",
+            "description": "Per-type config. h_agent: {task: google_form|ticket|custom_url, url, instructions}. composio: {action: drive_upload|sheets_append|slack_message, ...params}. condition: {expression}. voice: {text}.",
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  }
+}

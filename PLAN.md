@@ -1,172 +1,245 @@
-# palantirV2 — Project Plan
+# palantirV2 — Project Plan (v2, 3-person split)
 
-**Ambient perception → agentic action.** A camera watches a physical space; a
-vision pipeline (NVIDIA NeMo) turns what it sees into structured events (spill,
-occupancy, foot traffic, safety violation); an automation layer reacts by
-driving real software — OpenClaw orchestrates the response, driving H Company's
-computer-use agent to fill forms and navigate UIs, while Composio handles SaaS
-integrations (Drive, Sheets, Slack).
+**Ambient perception → agentic action.** Cameras watch a physical space.
+**NVIDIA NeMo** (Nemotron VLM via NIM) turns frames into structured events —
+spills, occupancy, foot traffic, safety violations. Those events flow into our
+**own workflow builder**: users visually compose automations whose steps are
+**H Company agent** runs (fill a Google Form, create a ticket — orchestrated
+through **OpenClaw**) and **Composio** actions (Drive, Sheets, Slack). A live
+dashboard shows everything happening.
 
 Built at The Computer Use Hackathon (H Company / NVIDIA / Accel), Jul 11–12 2026, SF.
 
----
+## Stack at a glance
+
+| Layer | Tech | Role |
+|---|---|---|
+| Perception | NVIDIA NeMo — Nemotron VLM via NIM API | Frames → detections (one prompt per event type) |
+| Events | Our JSON schema over HTTP | The contract between all parts |
+| Workflow engine | **Custom** — FastAPI backend | Trigger matching, step execution, run logs |
+| Workflow builder UI | Our dashboard (React/Vite, built) | Visual editor: trigger + ordered action steps |
+| Agent orchestration | **OpenClaw** driving **H Company agents** (credits in hand) | UI work: Google Forms, ticket builders, portals |
+| Integrations | **Composio** | API work: Drive, Sheets, Slack |
+| Voice (stretch) | Gradium | Spoken alerts, targets Gradium Challenge |
 
 ## Architecture
 
 ```
- video (webcam or clip)
+ video (webcam / RTSP / clip)
         │
         ▼
- ┌─────────────────┐   1 frame/sec    ┌──────────────────────────┐
- │   perception/    │ ───────────────▶ │  NVIDIA NeMo (Nemotron   │
- │  frame sampler   │                  │  VL via NIM API)         │
- └─────────────────┘                  └──────────┬───────────────┘
-                                                 │ detections
-                                                 ▼
-                                      ┌──────────────────────────┐
-                                      │  event normalizer         │
-                                      │  → shared event schema    │
-                                      └──────────┬───────────────┘
-                                                 │ HTTP POST /events
-                                                 ▼
- ┌────────────────────────────────────────────────────────────────┐
- │                        automation/                              │
- │  trigger engine (dedup, cooldown, thresholds)                   │
- │       ▼                                                         │
- │  OpenClaw orchestrator: picks & runs the recipe per event       │
- │       │                                                         │
- │       ├── H Company agent: UI tasks (fill incident form,        │
- │       │   raise safety ticket, navigate portals)                │
- │       └── Composio: Drive upload, Sheets append, Slack notify   │
- └──────────────────────────────┬─────────────────────────────────┘
-                                │ event + action log
-                                ▼
-                        ┌───────────────┐
-                        │   dashboard/   │  live event feed +
-                        └───────────────┘  "agent working on X"
+ ┌──────────────────┐  1 fps   ┌───────────────────────────┐
+ │   perception/     │ ───────▶ │ NVIDIA NeMo (Nemotron VL   │
+ │   frame sampler   │          │ via NIM API)               │
+ └──────────────────┘          └────────────┬───────────────┘
+                                            │ detections
+                                            ▼
+                                 ┌───────────────────────────┐
+                                 │ event normalizer           │
+                                 │ → shared/event_schema.json │
+                                 └────────────┬───────────────┘
+                                              │ POST /events
+                                              ▼
+ ┌───────────────────────────── automation/ ──────────────────────────────┐
+ │                                                                         │
+ │  trigger matcher (event type + zone + confidence + cooldown/dedup)      │
+ │        │ matched                                                        │
+ │        ▼                                                                │
+ │  WORKFLOW ENGINE — executes the workflow's steps in order,              │
+ │  records a Run with per-step status                                     │
+ │        │                                                                │
+ │        ├─ h_agent step ──▶ OpenClaw ──▶ H Company agent                 │
+ │        │                   (session mgmt, retries, replay capture)      │
+ │        │                   → fills Google Form / creates ticket / UI    │
+ │        ├─ composio step ─▶ Drive upload · Sheets append · Slack msg     │
+ │        ├─ condition step ─▶ e.g. only if payload.count > 20             │
+ │        └─ voice step (stretch) ─▶ Gradium spoken alert                  │
+ │                                                                         │
+ │  REST API: /events /workflows /runs  ◀──────────────┐                   │
+ └─────────────────────────────────────────────────────┼───────────────────┘
+                                                       │ poll
+                                              ┌────────┴────────┐
+                                              │   dashboard/     │
+                                              │ cameras · integr.│
+                                              │ WORKFLOW BUILDER │
+                                              │ live runs view   │
+                                              └─────────────────┘
 ```
-
-**The contract between the two halves is the event schema**
-([shared/event_schema.json](shared/event_schema.json)). Perception and
-automation are independently runnable services — no imports across the
-boundary, each side has a fake for the other (`perception` can dump events to
-a file; `automation` has a fake-event sender script).
 
 ## Repo layout
 
 ```
 palantirV2/
-  perception/    # video in → NeMo VLM detections → events out (Python)
-  automation/    # events in → triggers → OpenClaw → H agent + Composio (Python, FastAPI)
-  dashboard/     # live event feed + agent activity (simple web UI)
-  shared/        # event_schema.json — the one contract, frozen early
-  demo/          # pre-recorded clips, seeded data, run scripts
+  perception/    # Python: sampler → NeMo VLM → events                    (Person A)
+  automation/    # Python/FastAPI: workflow engine + OpenClaw + Composio  (Person B)
+  dashboard/     # React: console + workflow builder UI  [BUILT — extend] (Person C)
+  shared/        # event_schema.json + workflow_schema.json — the contracts
+  demo/          # clips, fake-event scripts, pitch assets
 ```
 
-## Event schema (v1 — freeze in hour one)
+## Data contracts (freeze by hour 2)
+
+**Event** — already frozen, see [shared/event_schema.json](shared/event_schema.json).
+
+**Workflow** — what the builder UI edits and the engine executes:
 
 ```json
 {
-  "event_id": "uuid",
-  "event_type": "spill | person_count | foot_traffic | safety_violation",
-  "timestamp": "ISO-8601",
-  "confidence": 0.92,
-  "location": "zone_a",
-  "snapshot_url": "path-or-url-to-frame",
-  "payload": { "count": 14, "detail": "free-form per event type" }
+  "id": "wf_spill_incident",
+  "name": "Spill → incident report",
+  "enabled": true,
+  "trigger": {
+    "event_type": "spill",
+    "zone": "zone_b",
+    "min_confidence": 0.7,
+    "cooldown_sec": 300
+  },
+  "steps": [
+    { "id": "s1", "type": "h_agent",  "config": { "task": "google_form",
+        "url": "https://forms.gle/…",
+        "instructions": "Fill the incident form: location={{event.location}}, time={{event.timestamp}}, description={{event.payload.detail}}. Attach {{event.snapshot_url}}. Submit." } },
+    { "id": "s2", "type": "composio", "config": { "action": "drive_upload",
+        "file": "{{event.snapshot_url}}", "folder": "incidents/" } },
+    { "id": "s3", "type": "composio", "config": { "action": "slack_message",
+        "channel": "#facilities-alerts",
+        "text": "🚨 {{event.event_type}} in {{event.location}} ({{event.confidence}})" } }
+  ]
 }
 ```
 
-Adding a new event type = a new VLM prompt in perception + a new OpenClaw
-recipe in automation. No pipeline changes.
+- `zone` is optional (omit = any zone). `cooldown_sec` dedups: one run per
+  (workflow, zone) per window — a spill at 1 fps must fire once, not thirty times.
+- `{{event.*}}` templating is resolved by the engine before each step runs.
+- Steps execute sequentially; a failed step marks the run failed (no retries
+  in v1 except inside OpenClaw for agent runs).
 
-## The four demo flows (priority order)
+**Run** — one execution of a workflow, what the dashboard's live view polls:
 
-| # | Flow | Trigger | Automation | Tier |
-|---|------|---------|-----------|------|
-| 1 | **Spill → incident report** | VLM flags liquid on floor | H agent opens facilities incident form, fills it, attaches snapshot; Composio files photo + row to Drive/Sheets | **Core** — build first, end to end |
-| 2 | **People count → occupancy** | Count crosses capacity threshold | Composio appends to occupancy sheet, Slack alert; H agent updates occupancy portal | Second |
-| 3 | **Safety/PPE check** | Missing hard-hat / blocked exit | H agent raises a safety ticket with evidence | Third — reuses flow 1's machinery |
-| 4 | **Foot traffic → analytics** | Zone counts aggregated over time | Periodic report generated, dropped into Drive; dashboard heatmap | Stretch — it's aggregation over events we already emit |
+```json
+{
+  "id": "run_abc",
+  "workflow_id": "wf_spill_incident",
+  "event": { "…triggering event…" },
+  "status": "running | done | failed",
+  "steps": [
+    { "id": "s1", "status": "done",    "started_at": "…", "output": { "replay_url": "…" } },
+    { "id": "s2", "status": "running", "started_at": "…" },
+    { "id": "s3", "status": "pending" }
+  ]
+}
+```
 
-Flow 1 is the demo centerpiece: it shows the agent doing visible, multi-step
-UI work that a plain webhook can't. Flows 2–4 mostly reuse the same pipeline
-with new prompts/recipes — that's the point of the architecture.
+**Automation service REST API** (dashboard ↔ backend contract):
 
-## Tech choices
+| Endpoint | Purpose |
+|---|---|
+| `POST /events` | perception (or fake script) submits events |
+| `GET /events?limit=N` | dashboard event feed |
+| `GET/POST/PUT/DELETE /workflows` | builder CRUD |
+| `GET /runs?limit=N`, `GET /runs/{id}` | live runs view |
+| `POST /workflows/{id}/test` | fire a synthetic event at one workflow (demo + dev) |
 
-- **Perception:** Python. Sample frames at ~1 fps, send to **Nemotron VL via
-  NVIDIA NIM API** (build.nvidia.com / hackathon credits) with one prompt per
-  event type ("Is there a liquid spill on the floor? Answer JSON…", "How many
-  people are visible?…"). One code path for all four event types.
-  - Why VLM over YOLO: no pretrained spill/PPE model exists worth fine-tuning
-    in 48h, and a prompt is a config change, not a training run. Using NeMo
-    end-to-end also targets the **NVIDIA Challenge** (RTX 5080).
-  - Stretch: local GPU YOLO for smooth bounding-box visuals in the dashboard.
-- **Automation:** Python + FastAPI service exposing `POST /events`. Trigger
-  engine with per-(zone, event_type) **cooldown/dedup** — one spill must fire
-  one incident, not thirty (frames arrive every second).
-  - **OpenClaw** is the orchestration harness / automation brain: for each
-    triggered event it selects the recipe and drives the downstream actions,
-    deciding when to hand off to the computer-use agent vs. call an API.
-  - **H Company agent** (Runner H / Surfer H), invoked by OpenClaw, for
-    anything that needs UI navigation — that's the hackathon's judged
-    capability, keep it front and center.
-  - **Composio** for API-shaped work (Drive, Sheets, Slack). Don't route
-    API-shaped work through the computer-use agent; judges will ask why.
-- **Dashboard:** simplest thing that looks alive — single-page app polling the
-  automation service: event feed, latest snapshot, agent run status/replays.
-- **Gradium stretch:** spoken alerts ("Spill detected in zone A") via Gradium
-  voice API — cheap add, targets the Gradium Challenge credits.
+## Step types (v1)
 
-## 48-hour timeline
+| Type | Executor | Config | Notes |
+|---|---|---|---|
+| `h_agent` | OpenClaw → H Company agent | task kind (google_form / ticket / custom_url), url, templated instructions | The judged capability. Capture replay/screenshots into run output |
+| `composio` | Composio SDK | action (drive_upload, sheets_append, slack_message), templated params | API-shaped work stays here — don't waste agent runs on it |
+| `condition` | engine built-in | expression on event payload, e.g. `payload.count > 20` | Stops the run quietly if false |
+| `voice` (stretch) | Gradium API | templated text to speak | Gradium Challenge |
 
-**Sat morning (hrs 0–4)**
-- Freeze event schema. Scaffold both services + fake-event sender.
-- Perception: webcam/clip → frame sampler → one NeMo VLM call working.
-- Automation: `POST /events` receiving fake events, logging them.
+## Work split — 3 people
 
-**Sat afternoon (hrs 4–10)**
-- Flow 1 end to end with FAKE events: trigger engine → H agent fills incident
-  form → Composio files to Drive. This is the riskiest integration; do it first.
-- Perception: spill + person_count prompts returning schema-valid events.
+### Person A — "Eyes" (perception, Python/CV)
 
-**Sat evening/night (hrs 10–18)**
-- Connect real perception → automation. First true end-to-end run.
-- Dashboard v1 (event feed + agent status). Flow 2 recipes.
-- Record clean demo clips of every working flow as you go (agent runs are
-  flaky; a recorded successful run is your safety net).
+1. Frame sampler: OpenCV capture from webcam / RTSP / video file at ~1 fps,
+   selected with a `--source` flag. Save each sampled frame to `snapshots/`
+   (served via a static route so `snapshot_url` resolves).
+2. NIM client: call Nemotron VLM with one prompt per event type; force JSON
+   output; parse and validate against the event schema.
+3. Prompt library: spill, person_count, foot_traffic (counts over a window),
+   safety_violation (PPE / blocked exit). Tune on saved demo clips, not the
+   live camera — cached frames make iteration free.
+4. Event emitter: `POST /events`, plus a `--dump` mode (write JSONL to a file)
+   so A never blocks on B.
+5. Record 3–4 demo clips (staged water spill, crowd walk-through,
+   missing-hard-hat) and calibrate per-event-type confidence on them.
+6. Stretch: local YOLO overlay for bounding-box visuals in the dashboard.
 
-**Sun morning (hrs 18–30)**
-- Flows 3 and 4. Dedup/cooldown tuning. Dashboard polish.
-- Gradium voice alerts if time allows.
+### Person B — "Brain" (automation backend, Python/FastAPI)
 
-**Sun afternoon (hrs 30–40)**
-- Feature freeze. Pre-record fallback demo videos (spill clip, crowd clip,
-  PPE clip). Rehearse the live demo path twice. Pitch deck / story.
+1. **Hour-0 spike (highest risk first):** using our existing credits, drive
+   one H Company agent run through OpenClaw that fills a throwaway Google
+   Form. Nothing else matters until this works once.
+2. FastAPI service: `POST /events`, SQLite (or JSON-file) persistence for
+   events, workflows, runs.
+3. Trigger matcher with per-(workflow, zone) cooldown.
+4. Workflow engine: sequential step executor, `{{event.*}}` templating,
+   run + per-step status persistence, async execution (runs must never block
+   event ingestion).
+5. Step executors: `h_agent` (via OpenClaw — session lifecycle, retry once,
+   capture replay URL/screenshots into run output), `composio` (Drive,
+   Sheets, Slack), `condition`.
+6. `send_fake_event.py` + seeded workflows so B and C never block on A.
+7. Stretch: `voice` step via Gradium.
 
-## Team split (3–5 people)
+### Person C — "Face" (dashboard + demo, React/TS)
 
-- **1–2 × Perception:** frame pipeline, NeMo prompts, event emission.
-- **1–2 × Automation:** trigger engine, OpenClaw orchestration, H Company agent recipes, Composio.
-- **1 × Dashboard + demo:** UI, demo clips, pitch, integration glue.
+The dashboard already exists (cameras, integrations, automations, event log,
+live feed — see [dashboard/README.md](dashboard/README.md)). C upgrades it
+from mock-backed to real and turns the Automations page into the builder:
 
-Both subteams work against fakes from hour one; integration is continuous,
-not a Sunday event.
+1. **Workflow builder UI**: trigger panel (event type, zone, confidence,
+   cooldown) + ordered step list — add/remove/reorder steps, per-type config
+   forms (h_agent: task kind, URL, instructions textarea with `{{event.*}}`
+   hints; composio: action picker + params; condition: expression).
+   Canvas/drag-drop is a nice-to-have; a list-based editor is enough to win.
+2. **Live runs view**: per-run timeline showing each step pending → running →
+   done, with agent replay links/screenshots from run output. This is the
+   demo money shot.
+3. Wire pages to the real API (`/workflows`, `/runs`, `/events`), keeping the
+   existing localStorage/simulation as offline fallback.
+4. Camera page: show latest snapshot per camera (from perception's frames).
+5. Demo ownership: rehearse the flow, record fallback videos of successful
+   runs, build the 90-second pitch and deck.
+
+### Sync points (whole team)
+
+| When | Checkpoint |
+|---|---|
+| Hr 2 | Contracts frozen: workflow + run schemas agreed, `POST /events` live |
+| Hr 6 | Fake spill event → workflow run → Slack message fires; runs visible in dashboard |
+| Hr 10 | **H agent fills the Google Form end-to-end from a fake event** — replay visible in runs view |
+| Hr 16 | Real camera → real event → full run. First true end-to-end |
+| Hr 24 | All 4 event types working; builder can create a new workflow from scratch live |
+| Hr 34 | Feature freeze. Record fallback demo videos, rehearse twice |
+
+## Demo script (90 seconds)
+
+1. Dashboard on screen: two cameras live, event feed streaming.
+2. Presenter pours water on the floor in front of the webcam.
+3. Spill event appears in the feed → a run starts in the live runs view.
+4. Screen shows the H agent (via OpenClaw replay) filling the facilities
+   Google Form field by field, attaching the snapshot, submitting.
+5. Slack alert pops, Drive folder shows the snapshot, sheet gets a row.
+6. Kicker: open the workflow builder and, live, add a "safety violation →
+   create ticket" workflow in ~20 seconds, then trigger it with a clip.
+   *"Anyone can wire the physical world to any software — no code."*
 
 ## Risks & mitigations
 
 | Risk | Mitigation |
-|------|-----------|
-| Live camera demo dies (lighting, lag) | Pre-recorded clips as primary demo, live webcam as flourish |
-| H agent runs are slow/flaky on stage | Record successful runs; show recording while a live run executes |
-| Event spam (1 fps → 30 identical events) | Cooldown/dedup in trigger engine from day one |
-| NIM API rate limits / credits | Cache VLM responses per clip during dev; sample at 1 fps, not 30 |
-| Four flows = scope creep | Tiered priorities; flow 1 must be perfect, 4 is a stretch |
+|---|---|
+| H agent API surprises | Person B's hour-0 spike; mentors on site; OpenClaw retry + recorded replays as stage fallback |
+| Agent slow/flaky live | Play a recorded successful replay while the live run executes |
+| Event spam (1 fps) | `cooldown_sec` per workflow from day one |
+| NIM rate limits / credits | Tune prompts on saved clips (cached responses), 1 fps sampling |
+| Builder UI scope creep | List-based steps, not canvas; drag-drop only if hours remain |
+| Team blocking on each other | Contracts by hr 2; fakes on every boundary (`--dump`, `send_fake_event.py`, dashboard simulation) |
 
 ## Prize alignment
 
-- **Main (H Company):** computer-use agent doing visible multi-step UI work,
-  orchestrated by OpenClaw and triggered by the real world — not a chatbot wrapper.
-- **NVIDIA Challenge:** NeMo/Nemotron VL powers the entire perception layer.
-- **Gradium Challenge:** voice alerts stretch goal.
+- **Main (H Company):** agents doing visible multi-step UI work, composable
+  by end users in a workflow builder — a genuinely new interface to their tech.
+- **NVIDIA Challenge:** NeMo/Nemotron VLM is the entire perception layer.
+- **Gradium Challenge:** voice step in the builder (stretch).
