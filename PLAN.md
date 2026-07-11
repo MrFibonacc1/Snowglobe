@@ -225,6 +225,27 @@ from mock-backed to real and turns the Automations page into the builder:
 | Hr 24 | All 4 event types working; builder can create a new workflow from scratch live |
 | Hr 34 | Feature freeze. Record fallback demo videos, rehearse twice |
 
+## NVIDIA Challenge: run H models through NemoClaw
+
+The side challenge is literal: **NemoClaw** is NVIDIA's open-source stack for
+running agent harnesses (OpenClaw, Hermes, Deep Agents) sandboxed in NVIDIA
+OpenShell on their hardware. H's **HoloDesktop CLI** runs H Agent on-device —
+powered by the **Holo 3.1** computer-use models NVIDIA quantized (2× faster,
+−35% memory on their GPUs) — and plugs into NemoClaw via MCP/ACP as the
+agent's eyes and hands.
+
+Integration (needs an NVIDIA GPU box — ask mentors for RTX / DGX Spark access):
+1. Install NemoClaw (single-command blueprint) on the GPU machine.
+2. Install HoloDesktop CLI; register it in NemoClaw as the MCP computer-use
+   tool. Holo 3.1 quantized checkpoints run locally on the GPU.
+3. Add `H_AGENT_MODE=nemoclaw` as a third backend in
+   `automation/steps/h_agent.py`: POST the rendered task to the NemoClaw
+   agent on the GPU box instead of H's cloud; capture the trace for the
+   runs view. The workflow engine doesn't change.
+4. Demo the same spill workflow running fully local: camera event → workflow
+   builder → NemoClaw-sandboxed agent → Holo on NVIDIA silicon. Hosted
+   `agent_api` (verified working) stays as the stage fallback.
+
 ## Demo script (90 seconds)
 
 1. Dashboard on screen: two cameras live, event feed streaming.
@@ -252,7 +273,8 @@ from mock-backed to real and turns the Automations page into the builder:
 
 - **Main (H Company):** agents doing visible multi-step UI work, composable
   by end users in a workflow builder — a genuinely new interface to their tech.
-- **NVIDIA Challenge:** Cosmos 3 Reasoner (their flagship physical-AI model,
-  released June 2026) is the entire perception layer — used for exactly the
-  smart-space workload it was built for.
+- **NVIDIA Challenge ("run the H Company models through NemoClaw"):**
+  Holo 3.1 executing our workflow tasks locally through NemoClaw on NVIDIA
+  hardware (see the NemoClaw section) — plus Cosmos 3 Reasoner powering
+  perception, so the stack is NVIDIA-accelerated end to end.
 - **Gradium Challenge:** voice step in the builder (stretch).
