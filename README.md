@@ -3,8 +3,8 @@
 Ambient perception → agentic action. A camera watches a space, NVIDIA NeMo
 (Nemotron VL) turns frames into structured events — spills, occupancy, foot
 traffic, safety violations — and an automation layer reacts by driving real
-software: H Company's computer-use agent fills forms and navigates UIs,
-Composio handles Drive/Sheets/Slack.
+software: OpenClaw orchestrates the response, driving H Company's computer-use
+agent to fill forms and navigate UIs, while Composio handles Drive/Sheets/Slack.
 
 Built at The Computer Use Hackathon (H Company × NVIDIA × Accel), SF, Jul 2026.
 
@@ -24,5 +24,5 @@ team split.
 ## Pipeline
 
 video → frame sampler (1 fps) → Nemotron VL via NIM → event normalizer →
-`POST /events` → trigger engine (dedup/cooldown) → H agent / Composio actions
-→ dashboard.
+`POST /events` → trigger engine (dedup/cooldown) → OpenClaw orchestrator →
+H agent / Composio actions → dashboard.

@@ -5,6 +5,9 @@ venv/
 .env
 node_modules/
 dist/
+*.tsbuildinfo
+dashboard/vite.config.js
+dashboard/vite.config.d.ts
 .DS_Store
 demo/*.mp4
 demo/*.mov

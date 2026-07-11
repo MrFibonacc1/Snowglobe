@@ -1,10 +1,11 @@
 # palantirV2 — Project Plan
 
 **Ambient perception → agentic action.** A camera watches a physical space; a
-vision pipeline turns what it sees into structured events (spill, occupancy,
-foot traffic, safety violation); an automation layer reacts by driving real
-software — H Company's computer-use agent fills forms and navigates UIs,
-Composio handles SaaS integrations (Drive, Sheets, Slack).
+vision pipeline (NVIDIA NeMo) turns what it sees into structured events (spill,
+occupancy, foot traffic, safety violation); an automation layer reacts by
+driving real software — OpenClaw orchestrates the response, driving H Company's
+computer-use agent to fill forms and navigate UIs, while Composio handles SaaS
+integrations (Drive, Sheets, Slack).
 
 Built at The Computer Use Hackathon (H Company / NVIDIA / Accel), Jul 11–12 2026, SF.
 
@@ -31,6 +32,8 @@ Built at The Computer Use Hackathon (H Company / NVIDIA / Accel), Jul 11–12 20
  ┌────────────────────────────────────────────────────────────────┐
  │                        automation/                              │
  │  trigger engine (dedup, cooldown, thresholds)                   │
+ │       ▼                                                         │
+ │  OpenClaw orchestrator: picks & runs the recipe per event       │
  │       │                                                         │
  │       ├── H Company agent: UI tasks (fill incident form,        │
  │       │   raise safety ticket, navigate portals)                │
@@ -54,7 +57,7 @@ a file; `automation` has a fake-event sender script).
 ```
 palantirV2/
   perception/    # video in → NeMo VLM detections → events out (Python)
-  automation/    # events in → triggers → H Company agent + Composio (Python, FastAPI)
+  automation/    # events in → triggers → OpenClaw → H agent + Composio (Python, FastAPI)
   dashboard/     # live event feed + agent activity (simple web UI)
   shared/        # event_schema.json — the one contract, frozen early
   demo/          # pre-recorded clips, seeded data, run scripts
@@ -74,8 +77,8 @@ palantirV2/
 }
 ```
 
-Adding a new event type = a new VLM prompt in perception + a new recipe in
-automation. No pipeline changes.
+Adding a new event type = a new VLM prompt in perception + a new OpenClaw
+recipe in automation. No pipeline changes.
 
 ## The four demo flows (priority order)
 
@@ -103,9 +106,12 @@ with new prompts/recipes — that's the point of the architecture.
 - **Automation:** Python + FastAPI service exposing `POST /events`. Trigger
   engine with per-(zone, event_type) **cooldown/dedup** — one spill must fire
   one incident, not thirty (frames arrive every second).
-  - **H Company agent API** (Runner H / Surfer H) for anything that needs UI
-    navigation — that's the hackathon's judged capability, keep it front and
-    center.
+  - **OpenClaw** is the orchestration harness / automation brain: for each
+    triggered event it selects the recipe and drives the downstream actions,
+    deciding when to hand off to the computer-use agent vs. call an API.
+  - **H Company agent** (Runner H / Surfer H), invoked by OpenClaw, for
+    anything that needs UI navigation — that's the hackathon's judged
+    capability, keep it front and center.
   - **Composio** for API-shaped work (Drive, Sheets, Slack). Don't route
     API-shaped work through the computer-use agent; judges will ask why.
 - **Dashboard:** simplest thing that looks alive — single-page app polling the
@@ -142,7 +148,7 @@ with new prompts/recipes — that's the point of the architecture.
 ## Team split (3–5 people)
 
 - **1–2 × Perception:** frame pipeline, NeMo prompts, event emission.
-- **1–2 × Automation:** trigger engine, H Company agent recipes, Composio.
+- **1–2 × Automation:** trigger engine, OpenClaw orchestration, H Company agent recipes, Composio.
 - **1 × Dashboard + demo:** UI, demo clips, pitch, integration glue.
 
 Both subteams work against fakes from hour one; integration is continuous,
@@ -161,6 +167,6 @@ not a Sunday event.
 ## Prize alignment
 
 - **Main (H Company):** computer-use agent doing visible multi-step UI work,
-  triggered by the real world — not a chatbot wrapper.
+  orchestrated by OpenClaw and triggered by the real world — not a chatbot wrapper.
 - **NVIDIA Challenge:** NeMo/Nemotron VL powers the entire perception layer.
 - **Gradium Challenge:** voice alerts stretch goal.
