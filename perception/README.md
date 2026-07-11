@@ -47,11 +47,15 @@ python -m perception.snapshot_server        # http://localhost:8001/snapshots/..
 
 ## Notes / decisions
 
-- **Model** is configurable (`VLM_MODEL` / `--model`). Default is Cosmos 3
-  Reasoner Nano on the hosted NIM; swap to Super's reasoner with GPU access,
-  or a Nemotron-VL fallback if Cosmos rate-limits. The NIM call is
-  OpenAI-compatible chat-completions with a base64 image part, so any of these
-  drop in without code changes.
+- **Model** is configurable (`VLM_MODEL` / `--model`). Default is
+  `nvidia/nemotron-nano-12b-v2-vl`, a Nemotron-VL model **verified working on
+  hosted inference** (build.nvidia.com) — it reads frames and returns our JSON
+  verdict. NVIDIA's Cosmos physical-AI reasoner (`nvidia/cosmos-reason2-8b`)
+  is the intended primary, but it 404s on hosted inference for our account —
+  it needs a self-hosted NIM container / GPU access. Point `VLM_BASE_URL` at
+  that NIM and set `VLM_MODEL=nvidia/cosmos-reason2-8b` once GPUs are
+  available. The NIM call is OpenAI-compatible chat-completions with a base64
+  image part, so any of these drop in without code changes.
 - **`foot_traffic` is derived from `person_count`** over a sliding window
   (`--traffic-window`, default 30s), not a separate per-frame model call —
   throughput is inherently temporal. A `foot_traffic` prompt still exists in

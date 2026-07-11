@@ -13,10 +13,15 @@ from dataclasses import dataclass
 # a self-hosted NIM container exposes the same shape on its own host:port.
 DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
-# Cosmos 3 Reasoner (Nano) — the hosted default. Swap via VLM_MODEL / --model:
-#   - Cosmos 3 Super's 32B reasoner if NVIDIA grants datacenter GPU access
-#   - a Nemotron-VL / VILA model id as the rate-limit fallback
-DEFAULT_MODEL = "nvidia/cosmos3-nano-reasoner"
+# Default is a Nemotron-VL model that IS served on hosted inference
+# (integrate.api.nvidia.com) and verified to read frames + return our JSON.
+#   - Cosmos physical-AI reasoner (`nvidia/cosmos-reason2-8b`) is the intended
+#     primary, but 404s on hosted inference for our account — it needs a
+#     self-hosted NIM container / GPU access. Point VLM_BASE_URL at that NIM
+#     and set VLM_MODEL=nvidia/cosmos-reason2-8b once we have the GPUs.
+#   - `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` is a larger hosted
+#     alternative (reasoning; emits <think> blocks we already strip).
+DEFAULT_MODEL = "nvidia/nemotron-nano-12b-v2-vl"
 
 DEFAULT_AUTOMATION_URL = "http://localhost:8000"
 # Static host for saved frames; see snapshot_server.py. None → emit local paths.
