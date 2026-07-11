@@ -37,6 +37,8 @@ function defaultConfig(type: StepType): Record<string, unknown> {
       return { expression: 'payload.count > 20' }
     case 'voice':
       return { text: '' }
+    case 'mcp':
+      return { server_url: '', tool: '', arguments: {} }
   }
 }
 
