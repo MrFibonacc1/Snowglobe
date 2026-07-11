@@ -15,6 +15,8 @@ entitlement/credits (portal) or you're in a beta queue. Open the printed
 agent_view_url in a browser and ask H mentors.
 """
 
+import envload  # noqa: F401  — loads automation/.env so the key is found
+
 import argparse
 import os
 import sys

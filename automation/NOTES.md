@@ -38,25 +38,27 @@ No clone, no venv, no browser. The step:
 
 Base URLs: EU `https://agp.eu.hcompany.ai/api/v2` · US `https://agp.hcompany.ai/api/v2`.
 
-### Verified status (2026-07-11)
+### Verified status (2026-07-11, evening) — ✅ FULLY WORKING
 
-Tested with a real key:
-- ✅ Auth works (EU **and** US): `GET /sessions` → 200 with key, 401 without.
-- ✅ Session creation works: `POST /sessions` → 201, returns id + `agent_view_url`.
-- ✅ Our executor POSTs, polls, and returns cleanly.
-- ⚠️ **Sessions sat at `status: running, steps: 0` and never progressed** (8+ min).
-  Creation is serviced but *execution* isn't — this is account-side, not our
-  code. Likely the key needs **Computer-Use Agent** entitlement/credits enabled
-  (distinct from the Models API free tier), or it's beta-queue latency.
+The earlier "sessions stall at steps: 0" issue is **resolved** (entitlement
+kicked in). Verified end to end with the team key:
+- ✅ Auth: `GET /sessions` → 200 (a rejected key gets **403**, not 401).
+- ✅ Standalone: `python test_h_connection.py` → agent navigated example.com
+  and answered in ~22s (status=idle, steps=2).
+- ✅ **Full pipeline**: fake spill event → workflow engine → h_agent step →
+  real hosted session → answer + `agent_view_url` captured in the run output
+  (22.7s). Agents also degrade gracefully: pointed at the placeholder
+  forms.gle URL, the agent completed and *reported* the link was dead.
 
-**To finish (do this at the event):**
-1. Open the `agent_view_url` from a launched session in a browser — it shows
-   *why* the session is idle (queued / needs billing / capacity).
-2. In portal.hcompany.ai confirm the **Agent API** (not just Models API) is
-   enabled and has credits for this key.
-3. Ask H mentors if hackathon keys are entitled for agent execution yet.
-Once a session reaches a terminal status with `steps > 0`, the whole pipeline
-works with zero code changes. Until then, `H_AGENT_MODE=mock` demos everything.
+Ops notes:
+- The key lives in `automation/.env` (gitignored); `envload.py` auto-loads it
+  for both `main.py` and `test_h_connection.py` — no exports needed.
+- `H_AGENT_MODE` still defaults to `mock` (safe). Run real mode with
+  `H_AGENT_MODE=agent_api uvicorn main:app --port 8000`, or add
+  `H_AGENT_MODE=agent_api` to `.env` to make it the default.
+- Each h_agent step consumes one hosted session (~20-30s) — replace the
+  seeded placeholder form URL with a real Google Form before enabling real
+  mode broadly, or every spill event spends a session on a dead link.
 
 ### Alternatives / notes
 - SDK: `pip install hai-agents` gives a typed client (`Client(api_key=...)`,

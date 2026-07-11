@@ -4,6 +4,8 @@ Run from this directory:  uvicorn main:app --port 8000 --reload
 API contract: PLAN.md §Data contracts.
 """
 
+import envload  # noqa: F401  — must be first: loads .env before steps read env
+
 import asyncio
 import json
 import os
