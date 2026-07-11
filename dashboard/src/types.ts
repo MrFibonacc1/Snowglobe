@@ -70,3 +70,51 @@ export interface ActivityItem {
   status: 'running' | 'done' | 'failed'
   detail: string
 }
+
+// --- Backend contracts (shared/workflow_schema.json + PLAN.md §Run) --------
+
+export type StepType = 'h_agent' | 'composio' | 'condition' | 'voice'
+
+export interface WorkflowTrigger {
+  event_type: EventType
+  zone?: string
+  min_confidence: number
+  cooldown_sec: number
+}
+
+export interface WorkflowStep {
+  id: string
+  type: StepType
+  config: Record<string, unknown>
+}
+
+export interface Workflow {
+  id: string
+  name: string
+  enabled: boolean
+  trigger: WorkflowTrigger
+  steps: WorkflowStep[]
+}
+
+export type RunStatus = 'running' | 'done' | 'failed'
+export type StepStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped'
+
+export interface RunStep {
+  id: string
+  type: StepType
+  status: StepStatus
+  started_at?: string
+  finished_at?: string
+  output?: Record<string, unknown>
+}
+
+export interface Run {
+  id: string
+  workflow_id: string
+  workflow_name?: string
+  event: AppEvent
+  status: RunStatus
+  started_at?: string
+  finished_at?: string
+  steps: RunStep[]
+}

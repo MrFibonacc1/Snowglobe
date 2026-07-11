@@ -5,17 +5,20 @@ import type {
   Automation,
   Camera,
   Integration,
+  Run,
+  Workflow,
 } from './types'
 import { EVENT_TYPES, EVENT_META } from './constants'
+import { api } from './api'
 import {
   integrationCatalog,
   seedAutomations,
   seedCameras,
   seedEvents,
+  seedWorkflows,
 } from './mockData'
 
 const KEY = 'snowglobe.state.v1'
-const AUTOMATION_URL = import.meta.env.VITE_AUTOMATION_URL as string | undefined
 
 interface PersistedState {
   cameras: Camera[]
@@ -23,21 +26,31 @@ interface PersistedState {
   automations: Automation[]
   events: AppEvent[]
   activity: ActivityItem[]
+  workflows: Workflow[]
 }
 
 function load(): PersistedState {
   try {
     const raw = localStorage.getItem(KEY)
-    if (raw) return JSON.parse(raw) as PersistedState
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<PersistedState>
+      // workflows was added later — backfill for older persisted state.
+      return { ...blank(), ...parsed } as PersistedState
+    }
   } catch {
     /* ignore corrupt state */
   }
+  return blank()
+}
+
+function blank(): PersistedState {
   return {
     cameras: seedCameras,
     integrations: integrationCatalog,
     automations: seedAutomations,
     events: seedEvents,
     activity: [],
+    workflows: seedWorkflows,
   }
 }
 
@@ -48,8 +61,13 @@ const uid = (p: string) => `${p}_${Date.now().toString(36)}${(seq++).toString(36
 export function useStore() {
   const [state, setState] = useState<PersistedState>(load)
   const [live, setLive] = useState(false)
+  // null = unknown, true/false = last known backend reachability.
+  const [backendOnline, setBackendOnline] = useState<boolean | null>(null)
+  const [runs, setRuns] = useState<Run[]>([])
   const stateRef = useRef(state)
   stateRef.current = state
+  const backendRef = useRef(backendOnline)
+  backendRef.current = backendOnline
 
   useEffect(() => {
     try {
@@ -59,6 +77,10 @@ export function useStore() {
     }
   }, [state])
 
+  const markBackend = useCallback((online: boolean) => {
+    if (backendRef.current !== online) setBackendOnline(online)
+  }, [])
+
   const pushEvent = useCallback((event: AppEvent) => {
     setState((s) => {
       const cameras = s.cameras.map((c) =>
@@ -66,7 +88,7 @@ export function useStore() {
           ? { ...c, eventsToday: c.eventsToday + 1 }
           : c,
       )
-      // Fire any enabled automation matching this event.
+      // Fire any enabled automation matching this event (offline simulation only).
       const activity: ActivityItem[] = []
       const automations = s.automations.map((a) => {
         const match =
@@ -95,22 +117,59 @@ export function useStore() {
     })
   }, [])
 
-  // Live polling of the automation service; falls back to simulation.
+  const mergeEvents = useCallback((incoming: AppEvent[]) => {
+    setState((s) => {
+      const known = new Set(s.events.map((e) => e.event_id))
+      const fresh = incoming.filter((e) => !known.has(e.event_id))
+      if (fresh.length === 0) return s
+      const cameras = s.cameras.map((c) => {
+        const n = fresh.filter((e) => e.location === c.zone && c.status === 'live').length
+        return n ? { ...c, eventsToday: c.eventsToday + n } : c
+      })
+      return {
+        ...s,
+        cameras,
+        events: [...fresh, ...s.events].slice(0, 200),
+      }
+    })
+  }, [])
+
+  // On mount (and whenever the backend is configured), hydrate workflows from
+  // the service so the builder edits real data. Falls back to seeded local.
+  useEffect(() => {
+    if (!api.configured()) return
+    let cancelled = false
+    api
+      .listWorkflows()
+      .then((wfs) => {
+        if (cancelled) return
+        markBackend(true)
+        setState((s) => ({ ...s, workflows: wfs }))
+      })
+      .catch(() => markBackend(false))
+    return () => {
+      cancelled = true
+    }
+  }, [markBackend])
+
+  // Live loop: poll events + runs from the backend; simulate if unreachable.
   useEffect(() => {
     if (!live) return
     let stopped = false
 
-    async function poll() {
-      if (!AUTOMATION_URL) return simulate()
+    async function tick() {
+      if (!api.configured()) return simulate()
       try {
-        const res = await fetch(`${AUTOMATION_URL}/events?limit=5`, {
-          signal: AbortSignal.timeout(3000),
-        })
-        if (!res.ok) throw new Error(String(res.status))
-        const data: AppEvent[] = await res.json()
-        const known = new Set(stateRef.current.events.map((e) => e.event_id))
-        data.filter((e) => !known.has(e.event_id)).forEach(pushEvent)
+        const [events, latestRuns] = await Promise.all([
+          api.listEvents(10),
+          api.listRuns(30),
+        ])
+        if (stopped) return
+        markBackend(true)
+        mergeEvents(events)
+        setRuns(latestRuns)
       } catch {
+        markBackend(false)
         simulate() // backend unreachable — keep the demo alive
       }
     }
@@ -135,16 +194,17 @@ export function useStore() {
       })
     }
 
+    tick()
     const t = setInterval(() => {
-      if (!stopped) poll()
-    }, 4500)
+      if (!stopped) tick()
+    }, 2500)
     return () => {
       stopped = true
       clearInterval(t)
     }
-  }, [live, pushEvent])
+  }, [live, pushEvent, mergeEvents, markBackend])
 
-  // --- mutations ---------------------------------------------------------
+  // --- camera mutations --------------------------------------------------
 
   const addCamera = useCallback((c: Omit<Camera, 'id' | 'eventsToday'>) => {
     const camera: Camera = { ...c, id: uid('cam'), eventsToday: 0 }
@@ -192,6 +252,95 @@ export function useStore() {
     }))
   }, [])
 
+  // --- workflow mutations (backend-first, local fallback) ----------------
+
+  const refreshWorkflows = useCallback(async () => {
+    if (!api.configured()) return
+    try {
+      const wfs = await api.listWorkflows()
+      markBackend(true)
+      setState((s) => ({ ...s, workflows: wfs }))
+    } catch {
+      markBackend(false)
+    }
+  }, [markBackend])
+
+  const saveWorkflow = useCallback(
+    async (wf: Workflow, isNew: boolean) => {
+      // Optimistic local update so the UI is responsive offline.
+      setState((s) => {
+        const exists = s.workflows.some((w) => w.id === wf.id)
+        return {
+          ...s,
+          workflows: exists
+            ? s.workflows.map((w) => (w.id === wf.id ? wf : w))
+            : [...s.workflows, wf],
+        }
+      })
+      if (!api.configured()) return
+      try {
+        const saved = isNew
+          ? await api.createWorkflow(wf)
+          : await api.updateWorkflow(wf.id, wf)
+        markBackend(true)
+        // Backend may assign/normalize the id — reconcile.
+        setState((s) => ({
+          ...s,
+          workflows: s.workflows.map((w) => (w.id === wf.id ? saved : w)),
+        }))
+      } catch {
+        markBackend(false)
+      }
+    },
+    [markBackend],
+  )
+
+  const removeWorkflow = useCallback(
+    async (id: string) => {
+      setState((s) => ({ ...s, workflows: s.workflows.filter((w) => w.id !== id) }))
+      if (!api.configured()) return
+      try {
+        await api.deleteWorkflow(id)
+        markBackend(true)
+      } catch {
+        markBackend(false)
+      }
+    },
+    [markBackend],
+  )
+
+  const toggleWorkflow = useCallback(
+    (id: string) => {
+      const wf = stateRef.current.workflows.find((w) => w.id === id)
+      if (!wf) return
+      saveWorkflow({ ...wf, enabled: !wf.enabled }, false)
+    },
+    [saveWorkflow],
+  )
+
+  const testWorkflow = useCallback(
+    async (id: string): Promise<string | null> => {
+      if (!api.configured()) return null
+      try {
+        const { run_id } = await api.testWorkflow(id)
+        markBackend(true)
+        // Pull the fresh run in immediately so the Runs view lights up.
+        try {
+          setRuns(await api.listRuns(30))
+        } catch {
+          /* non-fatal */
+        }
+        return run_id
+      } catch {
+        markBackend(false)
+        return null
+      }
+    },
+    [markBackend],
+  )
+
+  // --- legacy automation mutations (kept for offline Automations UI) -----
+
   const addAutomation = useCallback((a: Omit<Automation, 'id' | 'runs'>) => {
     setState((s) => ({
       ...s,
@@ -218,17 +367,25 @@ export function useStore() {
   const resetDemo = useCallback(() => {
     localStorage.removeItem(KEY)
     setState(load())
+    setRuns([])
   }, [])
 
   return {
     ...state,
+    runs,
     live,
     setLive,
+    backendOnline,
     addCamera,
     removeCamera,
     toggleCamera,
     setIntegrationStatus,
     addIntegration,
+    refreshWorkflows,
+    saveWorkflow,
+    removeWorkflow,
+    toggleWorkflow,
+    testWorkflow,
     addAutomation,
     toggleAutomation,
     removeAutomation,

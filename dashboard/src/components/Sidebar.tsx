@@ -5,6 +5,7 @@ import {
   IconBolt,
   IconList,
   IconFlask,
+  IconActivity,
 } from './icons'
 
 export type View =
@@ -12,6 +13,7 @@ export type View =
   | 'cameras'
   | 'integrations'
   | 'automations'
+  | 'runs'
   | 'events'
   | 'testing'
 
@@ -25,7 +27,8 @@ const NAV: { id: View; label: string; icon: JSX.Element }[] = [
   { id: 'overview', label: 'Overview', icon: <IconGrid size={17} /> },
   { id: 'cameras', label: 'Cameras', icon: <IconCamera size={17} /> },
   { id: 'integrations', label: 'Integrations', icon: <IconPlug size={17} /> },
-  { id: 'automations', label: 'Automations', icon: <IconBolt size={17} /> },
+  { id: 'automations', label: 'Workflows', icon: <IconBolt size={17} /> },
+  { id: 'runs', label: 'Runs', icon: <IconActivity size={17} /> },
   { id: 'events', label: 'Event log', icon: <IconList size={17} /> },
   { id: 'testing', label: 'Testing', icon: <IconFlask size={17} /> },
 ]

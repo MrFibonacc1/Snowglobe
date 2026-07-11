@@ -53,3 +53,6 @@ export const IconImage = ({ size }: P) => (
 export const IconFlask = ({ size }: P) => (
   <svg {...base(size)}><path d="M9 3h6M10 3v6l-5 9a1.5 1.5 0 0 0 1.3 2.2h11.4A1.5 1.5 0 0 0 19 18l-5-9V3" /><path d="M7.5 14h9" /></svg>
 )
+export const IconActivity = ({ size }: P) => (
+  <svg {...base(size)}><path d="M3 12h4l3 8 4-16 3 8h4" /></svg>
+)

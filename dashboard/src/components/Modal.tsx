@@ -7,9 +7,10 @@ interface Props {
   onClose: () => void
   children: ReactNode
   footer?: ReactNode
+  wide?: boolean
 }
 
-export function Modal({ title, subtitle, onClose, children, footer }: Props) {
+export function Modal({ title, subtitle, onClose, children, footer, wide }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', onKey)
@@ -18,7 +19,11 @@ export function Modal({ title, subtitle, onClose, children, footer }: Props) {
 
   return (
     <div className="overlay" onMouseDown={onClose}>
-      <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+      <div
+        className="modal"
+        style={wide ? { maxWidth: 760 } : undefined}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <div className="modal-head">
           <div className="row between">
             <h2>{title}</h2>

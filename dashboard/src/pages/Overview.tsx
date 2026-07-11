@@ -6,13 +6,16 @@ import { IconCamera, IconPlug, IconBolt, IconList, IconCheck } from '../componen
 export function Overview({ store }: { store: Store }) {
   const liveCams = store.cameras.filter((c) => c.status === 'live').length
   const connectedInts = store.integrations.filter((i) => i.status === 'connected').length
-  const enabledAutos = store.automations.filter((a) => a.enabled).length
+  const enabledAutos = store.workflows.filter((w) => w.enabled).length
   const eventsToday = store.cameras.reduce((n, c) => n + c.eventsToday, 0)
+
+  // Prefer real backend runs; fall back to the local simulation's activity.
+  const useRuns = store.runs.length > 0
 
   const stats = [
     { label: 'Live cameras', value: `${liveCams}/${store.cameras.length}`, icon: <IconCamera size={15} /> },
     { label: 'Integrations connected', value: connectedInts, icon: <IconPlug size={15} /> },
-    { label: 'Automations active', value: enabledAutos, icon: <IconBolt size={15} /> },
+    { label: 'Workflows active', value: enabledAutos, icon: <IconBolt size={15} /> },
     { label: 'Events today', value: eventsToday, icon: <IconList size={15} /> },
   ]
 
@@ -69,10 +72,39 @@ export function Overview({ store }: { store: Store }) {
         <div className="card">
           <div className="section-head">
             <h2>Agent activity</h2>
+            <div className="spacer" />
+            {useRuns && <span className="badge">live runs</span>}
           </div>
-          {store.activity.length === 0 ? (
+          {useRuns ? (
+            <div className="feed">
+              {store.runs.slice(0, 7).map((run) => {
+                const done = run.steps.filter((s) => s.status === 'done').length
+                return (
+                  <div className="activity-row" key={run.id}>
+                    {run.status === 'running' ? (
+                      <div className="spinner" />
+                    ) : run.status === 'failed' ? (
+                      <span className="tl-dot failed" style={{ marginTop: 5 }} />
+                    ) : (
+                      <span className="check"><IconCheck size={15} /></span>
+                    )}
+                    <div className="feed-main">
+                      <div className="feed-title">{run.workflow_name ?? run.workflow_id}</div>
+                      <div className="feed-sub">
+                        {EVENT_META[run.event.event_type]?.label} in {run.event.location}
+                        {' · '}{done}/{run.steps.length} steps
+                      </div>
+                    </div>
+                    <div className="feed-time">
+                      {run.started_at ? timeAgo(run.started_at) : ''}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : store.activity.length === 0 ? (
             <div className="empty" style={{ padding: '28px 16px' }}>
-              No agent runs yet. Turn on <b>Live</b> to watch automations fire.
+              No agent runs yet. Turn on <b>Live</b> to watch workflows fire.
             </div>
           ) : (
             <div className="feed">
