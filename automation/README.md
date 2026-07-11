@@ -8,7 +8,7 @@ confidence + per-(workflow, zone) cooldown) starts async runs; the engine
 executes steps sequentially with `{{event.*}}` templating and persists
 per-step status live:
 
-- **h_agent** — H Company agent via surfer-h-cli (or mock). See [NOTES.md](NOTES.md).
+- **h_agent** — H Company hosted Agent API (or mock). No local browser. See [NOTES.md](NOTES.md).
 - **composio** — Slack / Drive / Sheets via Composio SDK (or stub). See [NOTES.md](NOTES.md).
 - **condition** — gate on event payload, e.g. `payload.count > 20`.
 - **voice** — Gradium stretch (stub).

@@ -1,19 +1,19 @@
 """H Company agent step — drives a browser UI task (fill a Google Form,
-create a ticket, any URL) through H's open Surfer-H agent.
+create a ticket, any URL) through H's hosted Computer-Use Agent API.
 
 Modes (H_AGENT_MODE env var):
-  mock        (default) simulate a run so the pipeline demos with no keys
-  surfer_cli  invoke the real surfer-h-cli (github.com/hcompai/surfer-h-cli)
+  mock       (default) simulate a run so the pipeline demos with no keys
+  agent_api  RECOMMENDED — H's hosted Agent API (agp.eu.hcompany.ai). Fully
+             hosted browser; no local Selenium/Chrome. Verified working.
+  surfer_cli LEGACY — the deprecated open-source surfer-h-cli. Upstream is
+             unmaintained and its hosted endpoint is dead; kept only as a
+             self-hosting escape hatch. Prefer agent_api.
 
-The command mirrors the repo's run-on-holo.sh: navigation + localization both
-point at the hosted Holo model, API keys come from HAI_API_KEY. Set up the
-CLI + its client venv with automation/setup_h_agent.sh, then:
-
-  export H_AGENT_MODE=surfer_cli
-  export HAI_API_KEY=...            # from portal.hcompany.ai
-  # optional overrides (defaults match surfer-h-cli/.env.example):
-  # export HAI_MODEL_URL=https://api.hcompanyprod.fr/v1/models/holo1-7b-20250521
-  # export HAI_MODEL_NAME=holo1-7b-20250521
+Setup for agent_api:
+  pip install -r requirements.txt      # httpx is all we need
+  export H_AGENT_MODE=agent_api
+  export HAI_API_KEY=hk-...            # from portal.hcompany.ai
+  # optional: export HAI_AGENT_REGION=us    (default eu)
 
 config: { "task": "google_form" | "ticket" | "custom_url",
           "url": "<target page>",
@@ -21,106 +21,86 @@ config: { "task": "google_form" | "ticket" | "custom_url",
 """
 
 import os
-import re
-import subprocess
 import time
+
+import httpx
 
 MODE = os.environ.get("H_AGENT_MODE", "mock")
 
-# Where the surfer-h-cli repo lives, and its client-venv console script.
-# Defaults assume it was cloned next to automation/ (companyH/surfer-h-cli)
-# and set up via setup_h_agent.sh.
-_DEFAULT_CLI_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "surfer-h-cli")
+# Agent API (Computer-Use Agents). EU by default; US via HAI_AGENT_REGION=us.
+_REGION = os.environ.get("HAI_AGENT_REGION", "eu").lower()
+_DEFAULT_BASE = (
+    "https://agp.hcompany.ai/api/v2"
+    if _REGION == "us"
+    else "https://agp.eu.hcompany.ai/api/v2"
 )
-CLI_DIR = os.environ.get("SURFER_H_CLI_DIR", _DEFAULT_CLI_DIR)
-SURFER_H_BIN = os.environ.get(
-    "SURFER_H_BIN", os.path.join(CLI_DIR, ".venv", "bin", "surfer-h-cli")
-)
+AGENT_BASE_URL = os.environ.get("HAI_AGENT_BASE_URL", _DEFAULT_BASE)
+AGENT_NAME = os.environ.get("HAI_AGENT_NAME", "h/web-surfer-flash")
 
-# Hosted Holo defaults (from surfer-h-cli/.env.example).
-MODEL_URL = os.environ.get("HAI_MODEL_URL", "https://api.hcompanyprod.fr/v1/models/holo1-7b-20250521")
-MODEL_NAME = os.environ.get("HAI_MODEL_NAME", "holo1-7b-20250521")
+TIMEOUT_SEC = int(os.environ.get("H_AGENT_TIMEOUT_SEC", "300"))
+POLL_SEC = int(os.environ.get("H_AGENT_POLL_SEC", "5"))
 
-MAX_STEPS = int(os.environ.get("H_AGENT_MAX_STEPS", "30"))
-MAX_TIME_SEC = int(os.environ.get("H_AGENT_MAX_TIME_SEC", "300"))
-TIMEOUT_SEC = int(os.environ.get("H_AGENT_TIMEOUT_SEC", str(MAX_TIME_SEC + 60)))
-HEADLESS = os.environ.get("H_AGENT_HEADLESS", "1") != "0"
-
-_ANSI = re.compile(r"\x1b\[[0-9;]*m")
-_ANSWER = re.compile(r"Answer\s*:\s*(.*)")
+_RUNNING = {"pending", "running", "starting", "queued", "initializing", "created"}
 
 
 def execute(config: dict, event: dict) -> dict:
+    if MODE == "agent_api":
+        return _run_agent_api(config)
     if MODE == "surfer_cli":
-        return _run_surfer_cli(config)
+        from steps import h_agent_surfer_legacy  # deferred: heavy/optional
+        return h_agent_surfer_legacy.run(config)
     return _mock(config)
 
 
-def _build_cmd(config: dict) -> list[str]:
-    cmd = [
-        SURFER_H_BIN,
-        "--task", config["instructions"],
-        "--url", config["url"],
-        "--max_n_steps", str(MAX_STEPS),
-        "--max_time_seconds", str(MAX_TIME_SEC),
-        # navigation + localization both on the hosted Holo model
-        "--base_url_navigation", MODEL_URL,
-        "--model_name_navigation", MODEL_NAME,
-        "--temperature_navigation", "0.0",
-        "--base_url_localization", MODEL_URL,
-        "--model_name_localization", MODEL_NAME,
-        "--temperature_localization", "0.7",
-    ]
-    if HEADLESS:
-        cmd.append("--headless-browser")
-    return cmd
+def _run_agent_api(config: dict) -> dict:
+    api_key = os.environ.get("HAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("H_AGENT_MODE=agent_api but HAI_API_KEY is not set")
 
+    # The web agent picks its own start URL, so steer it in the message.
+    url = config.get("url")
+    instructions = config.get("instructions", "")
+    message = f"Go to {url}. {instructions}" if url else instructions
 
-def _subprocess_env() -> dict:
-    env = os.environ.copy()
-    api_key = env.get("HAI_API_KEY", "")
-    # surfer-h-cli reads per-skill keys; run-on-holo.sh sets both from HAI_API_KEY.
-    env.setdefault("API_KEY_NAVIGATION", api_key)
-    env.setdefault("API_KEY_LOCALIZATION", api_key)
-    return env
-
-
-def _run_once(config: dict) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        _build_cmd(config),
-        cwd=CLI_DIR,
-        capture_output=True,
-        text=True,
-        timeout=TIMEOUT_SEC,
-        env=_subprocess_env(),
-    )
-
-
-def _run_surfer_cli(config: dict) -> dict:
-    if not os.environ.get("HAI_API_KEY"):
-        raise RuntimeError("H_AGENT_MODE=surfer_cli but HAI_API_KEY is not set")
-    if not os.path.exists(SURFER_H_BIN):
-        raise RuntimeError(
-            f"surfer-h-cli not installed at {SURFER_H_BIN}; run automation/setup_h_agent.sh"
-        )
-
+    headers = {"Authorization": f"Bearer {api_key}"}
     started = time.time()
-    proc = _run_once(config)
-    if proc.returncode != 0:  # agent runs are flaky — retry once
-        proc = _run_once(config)
-        if proc.returncode != 0:
-            raise RuntimeError(f"surfer-h failed twice; stderr tail: {proc.stderr[-500:]}")
 
-    clean = _ANSI.sub("", proc.stdout)
-    answers = _ANSWER.findall(clean)
+    with httpx.Client(base_url=AGENT_BASE_URL, headers=headers, timeout=30) as client:
+        resp = client.post(
+            "/sessions",
+            json={
+                "agent": AGENT_NAME,
+                "messages": [{"type": "user_message", "message": message}],
+            },
+        )
+        resp.raise_for_status()
+        session = resp.json()
+        session_id = session["id"]
+        view_url = session.get("agent_view_url")
+
+        # Poll until the session finishes or we hit our time budget.
+        last = session
+        while time.time() - started < TIMEOUT_SEC:
+            time.sleep(POLL_SEC)
+            r = client.get(f"/sessions/{session_id}")
+            r.raise_for_status()
+            last = r.json()
+            status = (last.get("status") or {}).get("status")
+            if last.get("finished_at") or (status and status not in _RUNNING):
+                break
+
+    st = last.get("status") or {}
     return {
-        "backend": "surfer_cli",
-        "task": config.get("task"),
-        "url": config["url"],
+        "backend": "agent_api",
+        "session_id": session_id,
+        "agent_view_url": view_url,   # live/replay link — surface in the dashboard
+        "status": st.get("status"),
+        "outcome": st.get("outcome"),
+        "steps": st.get("steps"),
+        "answer": last.get("latest_answer"),
         "duration_sec": round(time.time() - started, 1),
-        "answer": answers[-1].strip() if answers else None,
-        "trajectory_tail": "\n".join(clean.splitlines()[-40:]),
+        "task": config.get("task"),
+        "url": url,
     }
 
 
@@ -135,5 +115,5 @@ def _mock(config: dict) -> dict:
         "summary": f"[mock] agent would open {config.get('url')} and: "
                    f"{config.get('instructions', '')[:160]}",
         "answer": None,
-        "replay_url": None,
+        "agent_view_url": None,
     }

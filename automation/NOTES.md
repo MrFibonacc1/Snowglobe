@@ -6,79 +6,77 @@ so nobody is ever blocked.
 
 ## H Company agent (`steps/h_agent.py`)
 
-Uses H's open-source **surfer-h-cli** (github.com/hcompai/surfer-h-cli) — a
-Selenium browser agent driven by the Holo models. Two backends, selected by
-`H_AGENT_MODE`:
+⚠️ **Update:** the open-source `surfer-h-cli` we first targeted is **deprecated
+and unmaintained**, and its hosted endpoint (`api.hcompanyprod.fr`) is dead.
+H's supported path is now the hosted **Computer-Use Agent API** — a fully
+hosted browser agent, so **no local Selenium/Chrome needed.** We rebuilt the
+step against it.
+
+Modes (`H_AGENT_MODE`):
 
 | Mode | What happens |
 |---|---|
-| `mock` (default) | Simulates a 4s agent run; output says what it *would* do. Demo-safe, no keys. |
-| `surfer_cli` | Invokes the real `surfer-h-cli` console script against the hosted Holo API. |
+| `mock` (default) | Simulates a 4s run; demo-safe, no keys. |
+| `agent_api` | **Recommended.** Calls the hosted Agent API over HTTP (httpx). No browser. |
+| `surfer_cli` | Legacy. Deprecated upstream; only for self-hosting Holo via vLLM. Needs local Chrome. |
 
-### One-command setup (verified)
-
-```bash
-bash automation/setup_h_agent.sh
-```
-
-This clones surfer-h-cli next to `automation/` (→ `companyH/surfer-h-cli`,
-gitignored) and builds a **client-only venv** — it installs `requirements.txt`
-(openai, selenium, seleniumbase, pydantic, pillow) + the package with
-`--no-deps`, deliberately skipping the heavy `vllm`/`transformers` stack in
-`pyproject.toml` (that's only for *self-hosting* the model; we call the hosted
-API). Verified: `surfer-h-cli --help` runs from the client venv with no GPU deps.
-
-Then run the automation service with:
+### agent_api setup (this is all it takes)
 
 ```bash
-export H_AGENT_MODE=surfer_cli
-export HAI_API_KEY=<key from portal.hcompany.ai>   # we have credits
-# optional (defaults from surfer-h-cli/.env.example):
-# export HAI_MODEL_URL=https://api.hcompanyprod.fr/v1/models/holo1-7b-20250521
-# export HAI_MODEL_NAME=holo1-7b-20250521
+pip install -r requirements.txt        # httpx — nothing else
+export H_AGENT_MODE=agent_api
+export HAI_API_KEY=hk-...               # from portal.hcompany.ai
+# optional: export HAI_AGENT_REGION=us  (default eu)
+#           export HAI_AGENT_NAME=h/web-surfer-flash
 ```
 
-### What the executor runs
+No clone, no venv, no browser. The step:
+1. `POST {base}/sessions` with `{"agent": "h/web-surfer-flash", "messages":[{"type":"user_message","message":"Go to <url>. <instructions>"}]}`
+2. polls `GET {base}/sessions/{id}` until `finished_at` / terminal status
+3. returns `session_id`, **`agent_view_url`** (a live/replay link — surface it in
+   the dashboard runs view!), `status`, `outcome`, and `latest_answer`.
 
-Mirrors the repo's `run-on-holo.sh` exactly (verified against the CLI's real
-argparse): navigation + localization both target the hosted Holo model, and
-`API_KEY_NAVIGATION` / `API_KEY_LOCALIZATION` are set from `HAI_API_KEY`.
-It parses the agent's `💬 Answer :` line from stdout into the run output and
-keeps the trajectory tail (what the dashboard shows). Retries once (agent runs
-are flaky). Env knobs: `SURFER_H_BIN`, `H_AGENT_MAX_STEPS`, `H_AGENT_MAX_TIME_SEC`,
-`H_AGENT_HEADLESS` (1/0).
+Base URLs: EU `https://agp.eu.hcompany.ai/api/v2` · US `https://agp.hcompany.ai/api/v2`.
 
-### ⚠️ Known local gotcha — Chrome/Selenium (must resolve before real runs)
+### Verified status (2026-07-11)
 
-On this machine (Chrome 150 + selenium 4.46), launching the browser fails with
-`SessionNotCreatedException: unable to discover open pages`, both headless and
-headed — even though chromedriver matches Chrome exactly. It's a Chrome-version/
-Selenium quirk, **not** our wiring: setup, CLI, args, key-passing, and Chrome
-launch all fire correctly; it dies at Selenium session creation. Everything up
-to the hosted API call is proven.
+Tested with a real key:
+- ✅ Auth works (EU **and** US): `GET /sessions` → 200 with key, 401 without.
+- ✅ Session creation works: `POST /sessions` → 201, returns id + `agent_view_url`.
+- ✅ Our executor POSTs, polls, and returns cleanly.
+- ⚠️ **Sessions sat at `status: running, steps: 0` and never progressed** (8+ min).
+  Creation is serviced but *execution* isn't — this is account-side, not our
+  code. Likely the key needs **Computer-Use Agent** entitlement/credits enabled
+  (distinct from the Models API free tier), or it's beta-queue latency.
 
-Fixes to try at the event (in order):
-1. Different demo machine / slightly older Chrome — often just works.
-2. In `surfer-h-cli/src/surfer_h_cli/simple_browser.py::open_browser`, add a
-   fresh profile dir: `options.add_argument(f"--user-data-dir={tempfile.mkdtemp()}")`
-   and switch `--headless` → `--headless=new`. (Local patch to the vendored
-   clone; not committed to our repo.)
-3. Ask H mentors whether the hosted **Runner H / Studio API** is open to
-   hackathon keys — that's an HTTP API with no local browser at all; if so,
-   add it as a third `H_AGENT_MODE` and skip Selenium entirely. Cleanest path.
+**To finish (do this at the event):**
+1. Open the `agent_view_url` from a launched session in a browser — it shows
+   *why* the session is idle (queued / needs billing / capacity).
+2. In portal.hcompany.ai confirm the **Agent API** (not just Models API) is
+   enabled and has credits for this key.
+3. Ask H mentors if hackathon keys are entitled for agent execution yet.
+Once a session reaches a terminal status with `steps > 0`, the whole pipeline
+works with zero code changes. Until then, `H_AGENT_MODE=mock` demos everything.
 
-Until resolved, `H_AGENT_MODE=mock` fully demos the pipeline.
+### Alternatives / notes
+- SDK: `pip install hai-agents` gives a typed client (`Client(api_key=...)`,
+  sync + async). We use raw HTTP to keep the automation service dependency-free
+  beyond httpx; swap in the SDK if you prefer typed responses.
+- Models API (`https://api.hcompany.ai/v1/`, OpenAI-compatible) serves the raw
+  Holo VLMs — a different product from the Agent API; not needed here.
+- Legacy self-host: `surfer-h-cli/launch.sh` runs a local viewer on :3000;
+  requires vLLM-served Holo + working local Chrome (see gotcha below).
 
-### Alternatives
-- Self-host Holo via vLLM (`vllm serve Hcompany/Holo1-7B`) and point
-  `HAI_MODEL_URL` at it — relevant for the NVIDIA challenge (their GPUs).
-- `surfer-h-cli/launch.sh` runs a backend + Next.js viewer on :3000 — useful
-  for capturing a visual replay for the demo.
+### Legacy Chrome gotcha (surfer_cli mode only)
+On Chrome 150 + selenium 4.46, the local Selenium agent fails with
+`SessionNotCreatedException: unable to discover open pages` (matching driver,
+both headless/headed). Irrelevant to `agent_api`. If you must use surfer_cli,
+patch `simple_browser.py::open_browser` with a fresh `--user-data-dir` and
+`--headless=new`.
 
 ## Composio (`steps/composio_step.py`)
 
-One SDK for the API-shaped actions (Slack, Drive, Sheets), auth per connected
-account.
+One SDK for the API-shaped actions (Slack, Drive, Sheets), auth per account.
 
 ```bash
 pip install composio
@@ -88,9 +86,8 @@ composio connected-accounts link googledrive
 composio connected-accounts link googlesheets
 ```
 
-The executor calls `client.tools.execute(slug=…, user_id=…, arguments=…)`.
-Slugs used (verify with `composio tools info <SLUG>` after linking — names
-occasionally change):
+Executor calls `client.tools.execute(slug=…, user_id=…, arguments=…)`. Slugs
+(verify with `composio tools info <SLUG>` after linking):
 
 | Our action | Composio slug | Arguments |
 |---|---|---|
@@ -98,18 +95,19 @@ occasionally change):
 | `drive_upload` | `GOOGLEDRIVE_UPLOAD_FILE` | file_to_upload, folder_to_upload_to |
 | `sheets_append` | `GOOGLESHEETS_BATCH_UPDATE` | spreadsheet_id, sheet_name, values |
 
-Without `COMPOSIO_API_KEY`, every action logs its payload and returns
+Without `COMPOSIO_API_KEY`, actions log their payload and return
 `{"stubbed": true}` — runs still complete, dashboard still animates.
 
 ## Env summary
 
 | Var | Needed for |
 |---|---|
-| `H_AGENT_MODE` | `mock` (default) / `surfer_cli` |
-| `HAI_API_KEY` | surfer_cli mode (hosted Holo) |
-| `HAI_MODEL_URL`, `HAI_MODEL_NAME` | optional overrides (sensible defaults) |
-| `SURFER_H_CLI_DIR`, `SURFER_H_BIN` | override clone / console-script location |
-| `H_AGENT_HEADLESS`, `H_AGENT_MAX_STEPS`, `H_AGENT_MAX_TIME_SEC` | agent tuning |
+| `H_AGENT_MODE` | `mock` (default) / `agent_api` / `surfer_cli` |
+| `HAI_API_KEY` | agent_api (and surfer_cli) |
+| `HAI_AGENT_REGION` | `eu` (default) / `us` |
+| `HAI_AGENT_BASE_URL`, `HAI_AGENT_NAME` | agent_api overrides |
+| `H_AGENT_TIMEOUT_SEC`, `H_AGENT_POLL_SEC` | agent_api polling |
+| `SURFER_H_CLI_DIR`, `SURFER_H_BIN`, `HAI_MODEL_URL`, `HAI_MODEL_NAME` | legacy surfer_cli |
 | `COMPOSIO_API_KEY`, `COMPOSIO_USER_ID` | real Composio actions |
 | `GRADIUM_API_KEY` | voice step (stretch, not implemented) |
 | `AUTOMATION_DB` | SQLite path override (default `automation/data.db`) |
