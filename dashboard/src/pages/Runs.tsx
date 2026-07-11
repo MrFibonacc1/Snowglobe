@@ -127,10 +127,19 @@ function StepDetail({ step }: { step: RunStep }) {
   if (out.error) return <div className="tl-sub" style={{ color: 'var(--danger)' }}>{String(out.error)}</div>
 
   if (step.type === 'h_agent') {
+    // The agent's actual answer is the most useful thing to show.
+    if (out.answer) {
+      return (
+        <div className="tl-sub">
+          <span className="faint">{String(out.backend ?? 'agent')} · </span>
+          {String(out.answer)}
+        </div>
+      )
+    }
     const bits: string[] = []
     if (out.backend) bits.push(String(out.backend))
     if (out.task) bits.push(String(out.task))
-    if (out.status) bits.push(`status ${out.status}`)
+    if (out.status || out.state) bits.push(`status ${out.status ?? out.state}`)
     if (out.summary) return <div className="tl-sub">{String(out.summary)}</div>
     return <div className="tl-sub">{bits.join(' · ') || 'agent run'}</div>
   }

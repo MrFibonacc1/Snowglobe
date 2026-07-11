@@ -384,6 +384,14 @@ input, select, textarea {
   display: grid;
   place-items: center;
   color: var(--text-faint);
+  overflow: hidden;
+}
+.cam-snap {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .cam-preview .scan {
   position: absolute;

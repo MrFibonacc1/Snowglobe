@@ -1,9 +1,31 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Store } from '../store'
 import type { AuthType, Integration, IntegrationCategory } from '../types'
 import { CATEGORY_LABEL } from '../constants'
 import { Modal } from '../components/Modal'
 import { IconPlus, IconCheck } from '../components/icons'
+import { api, type BackendStatus } from '../api'
+
+// Integrations whose real state lives in automation/.env — when the backend
+// is reachable we show its truth and disable the local connect/disconnect.
+const ENV_MANAGED: Record<string, (s: BackendStatus) => { connected: boolean; label?: string }> = {
+  h_agent: (s) => ({
+    connected: s.h_agent.key_present,
+    label: s.h_agent.key_present ? `mode: ${s.h_agent.mode}` : undefined,
+  }),
+  gdrive: (s) => ({ connected: s.composio.configured, label: s.composio.configured ? 'via Composio' : undefined }),
+  gsheets: (s) => ({ connected: s.composio.configured, label: s.composio.configured ? 'via Composio' : undefined }),
+  slack: (s) => ({ connected: s.composio.configured, label: s.composio.configured ? 'via Composio' : undefined }),
+  gradium_voice: (s) => ({ connected: s.gradium.configured }),
+}
+
+const ENV_HINT: Record<string, string> = {
+  h_agent: 'Set HAI_API_KEY in automation/.env',
+  gdrive: 'Set COMPOSIO_API_KEY + link account (NOTES.md)',
+  gsheets: 'Set COMPOSIO_API_KEY + link account (NOTES.md)',
+  slack: 'Set COMPOSIO_API_KEY + link account (NOTES.md)',
+  gradium_voice: 'Set GRADIUM_API_KEY in automation/.env',
+}
 
 const LOGO: Record<string, string> = {
   h_agent: '🤖',
@@ -23,62 +45,118 @@ const AUTH_COPY: Record<AuthType, { cta: string; field: string; placeholder: str
 export function Integrations({ store }: { store: Store }) {
   const [connecting, setConnecting] = useState<Integration | null>(null)
   const [creating, setCreating] = useState(false)
+  const [status, setStatus] = useState<BackendStatus | null>(null)
+
+  useEffect(() => {
+    if (!api.configured()) return
+    let cancelled = false
+    const load = () =>
+      api
+        .status()
+        .then((s) => !cancelled && setStatus(s))
+        .catch(() => !cancelled && setStatus(null))
+    load()
+    const t = setInterval(load, 10_000)
+    return () => {
+      cancelled = true
+      clearInterval(t)
+    }
+  }, [])
+
+  // With a live backend, env-managed cards show the backend's truth.
+  const effective = (i: Integration): Integration => {
+    if (!status || !ENV_MANAGED[i.id]) return i
+    const real = ENV_MANAGED[i.id](status)
+    return {
+      ...i,
+      status: real.connected ? 'connected' : 'disconnected',
+      accountLabel: real.label,
+    }
+  }
+  const integrations = store.integrations.map(effective)
 
   return (
     <div className="stack gap-16">
       <div className="section-head">
         <h2>Integrations</h2>
         <span className="muted">
-          {store.integrations.filter((i) => i.status === 'connected').length} connected
+          {integrations.filter((i) => i.status === 'connected').length} connected
         </span>
         <div className="spacer" />
+        <span className="badge">
+          <span className={`dot ${status ? 'live' : 'offline'}`} />
+          {status ? 'live status from backend' : 'local demo state'}
+        </span>
         <button className="btn btn-primary" onClick={() => setCreating(true)}>
           <IconPlus size={16} /> Create integration
         </button>
       </div>
 
+      {status && (
+        <div className="card" style={{ padding: '12px 16px' }}>
+          <div className="row wrap gap-6">
+            <span className="chip" style={{ color: 'var(--accent-2)' }}>
+              🤖 agent mode: {status.h_agent.mode}
+            </span>
+            <span className="chip">
+              NemoClaw {status.nemoclaw.active ? `→ ${status.nemoclaw.url}` : 'inactive'}
+            </span>
+            <span className="chip">{status.counts.workflows} workflows</span>
+            <span className="chip">{status.counts.events} events</span>
+            <span className="chip">{status.counts.runs} runs</span>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-3">
-        {store.integrations.map((i) => (
-          <div className="int-card" key={i.id}>
-            <div className="int-top">
-              <div className="int-logo">{LOGO[i.id] ?? '🔌'}</div>
-              <div>
-                <h3>{i.name}</h3>
-                <div className="cat">{CATEGORY_LABEL[i.category]}</div>
+        {integrations.map((i) => {
+          const envManaged = Boolean(status && ENV_MANAGED[i.id])
+          return (
+            <div className="int-card" key={i.id}>
+              <div className="int-top">
+                <div className="int-logo">{LOGO[i.id] ?? '🔌'}</div>
+                <div>
+                  <h3>{i.name}</h3>
+                  <div className="cat">{CATEGORY_LABEL[i.category]}</div>
+                </div>
+                <div className="spacer" style={{ flex: 1 }} />
+                {i.status === 'connected' && (
+                  <span className="badge" style={{ color: 'var(--success)' }}>
+                    <IconCheck size={13} /> connected
+                  </span>
+                )}
               </div>
-              <div className="spacer" style={{ flex: 1 }} />
-              {i.status === 'connected' && (
-                <span className="badge" style={{ color: 'var(--success)' }}>
-                  <IconCheck size={13} /> connected
-                </span>
-              )}
-            </div>
-            <div className="int-desc">{i.description}</div>
-            <div className="int-foot">
-              {i.status === 'connected' ? (
-                <>
-                  {i.accountLabel && (
-                    <span className="chip">{i.accountLabel}</span>
-                  )}
-                  <div className="spacer" style={{ flex: 1 }} />
+              <div className="int-desc">{i.description}</div>
+              <div className="int-foot">
+                {i.accountLabel && <span className="chip">{i.accountLabel}</span>}
+                <div className="spacer" style={{ flex: 1 }} />
+                {envManaged ? (
+                  i.status === 'connected' ? (
+                    <span className="chip">env-managed</span>
+                  ) : (
+                    <span className="chip" title={ENV_HINT[i.id]}>
+                      {ENV_HINT[i.id]}
+                    </span>
+                  )
+                ) : i.status === 'connected' ? (
                   <button
                     className="btn btn-sm btn-ghost"
                     onClick={() => store.setIntegrationStatus(i.id, 'disconnected')}
                   >
                     Disconnect
                   </button>
-                </>
-              ) : (
-                <button
-                  className="btn btn-sm btn-primary"
-                  onClick={() => setConnecting(i)}
-                >
-                  {AUTH_COPY[i.authType].cta}
-                </button>
-              )}
+                ) : (
+                  <button
+                    className="btn btn-sm btn-primary"
+                    onClick={() => setConnecting(i)}
+                  >
+                    {AUTH_COPY[i.authType].cta}
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {connecting && (

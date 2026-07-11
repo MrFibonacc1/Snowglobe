@@ -138,3 +138,26 @@ async def get_run(run_id: str):
 @app.get("/health")
 async def health():
     return {"ok": True}
+
+
+@app.get("/status")
+async def status():
+    """Real integration state for the dashboard — booleans only, never values."""
+    return {
+        "h_agent": {
+            "mode": os.environ.get("H_AGENT_MODE", "mock"),
+            "key_present": bool(os.environ.get("HAI_API_KEY")),
+            "region": os.environ.get("HAI_AGENT_REGION", "eu"),
+        },
+        "composio": {"configured": bool(os.environ.get("COMPOSIO_API_KEY"))},
+        "gradium": {"configured": bool(os.environ.get("GRADIUM_API_KEY"))},
+        "nemoclaw": {
+            "url": os.environ.get("NEMOCLAW_A2A_URL", "http://localhost:8123"),
+            "active": os.environ.get("H_AGENT_MODE") == "nemoclaw",
+        },
+        "counts": {
+            "events": len(storage.list_events(1000)),
+            "workflows": len(storage.list_workflows()),
+            "runs": len(storage.list_runs(1000)),
+        },
+    }

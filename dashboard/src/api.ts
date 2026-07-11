@@ -27,10 +27,19 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T
 }
 
+export interface BackendStatus {
+  h_agent: { mode: string; key_present: boolean; region: string }
+  composio: { configured: boolean }
+  gradium: { configured: boolean }
+  nemoclaw: { url: string; active: boolean }
+  counts: { events: number; workflows: number; runs: number }
+}
+
 export const api = {
   configured: () => Boolean(AUTOMATION_URL),
 
   health: () => req<{ ok: boolean }>('/health'),
+  status: () => req<BackendStatus>('/status'),
 
   // events
   listEvents: (limit = 50) => req<AppEvent[]>(`/events?limit=${limit}`),

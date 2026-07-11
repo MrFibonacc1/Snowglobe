@@ -53,9 +53,24 @@ export function Cameras({ store }: { store: Store }) {
 }
 
 function CameraCard({ cam, store }: { cam: Camera; store: Store }) {
+  const [snapBroken, setSnapBroken] = useState(false)
+  // Latest event from this camera's zone that carries a frame — the closest
+  // thing to a live preview without streaming video into the browser.
+  const snap = store.events.find(
+    (e) => e.location === cam.zone && e.snapshot_url,
+  )?.snapshot_url
+
   return (
     <div className="cam-card">
       <div className="cam-preview">
+        {snap && !snapBroken && (
+          <img
+            className="cam-snap"
+            src={snap}
+            alt=""
+            onError={() => setSnapBroken(true)}
+          />
+        )}
         {cam.status === 'live' && <div className="scan" />}
         <div className="live-tag">
           <span className="badge">
@@ -63,7 +78,7 @@ function CameraCard({ cam, store }: { cam: Camera; store: Store }) {
             {cam.status}
           </span>
         </div>
-        <IconCamera size={30} />
+        {(!snap || snapBroken) && <IconCamera size={30} />}
         <div className="fps-tag">{cam.fps} fps</div>
       </div>
       <div className="cam-body">

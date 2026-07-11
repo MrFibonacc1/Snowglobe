@@ -2,7 +2,6 @@ import {
   IconGrid,
   IconCamera,
   IconPlug,
-  IconBolt,
   IconList,
   IconFlask,
   IconActivity,
@@ -23,11 +22,12 @@ interface Props {
   counts: { cameras: number; integrations: number; automations: number }
 }
 
+// 'automations' (WorkflowBuilder) is intentionally hidden from nav for now —
+// the page and API wiring stay intact; re-add the entry to bring it back.
 const NAV: { id: View; label: string; icon: JSX.Element }[] = [
   { id: 'overview', label: 'Overview', icon: <IconGrid size={17} /> },
   { id: 'cameras', label: 'Cameras', icon: <IconCamera size={17} /> },
   { id: 'integrations', label: 'Integrations', icon: <IconPlug size={17} /> },
-  { id: 'automations', label: 'Workflows', icon: <IconBolt size={17} /> },
   { id: 'runs', label: 'Runs', icon: <IconActivity size={17} /> },
   { id: 'events', label: 'Event log', icon: <IconList size={17} /> },
   { id: 'testing', label: 'Testing', icon: <IconFlask size={17} /> },
