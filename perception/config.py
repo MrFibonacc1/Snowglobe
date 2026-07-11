@@ -8,6 +8,24 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+_ENV_LOADED = False
+
+
+def _load_env() -> None:
+    """Load perception/.env once, by absolute path, so it works no matter which
+    directory the process was launched from (repo root, perception/, uvicorn)."""
+    global _ENV_LOADED
+    if _ENV_LOADED:
+        return
+    _ENV_LOADED = True
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(Path(__file__).resolve().parent / ".env")
+    except Exception:
+        pass  # python-dotenv not installed — rely on real env vars
 
 # OpenAI-compatible NIM endpoint. build.nvidia.com serves models at this base;
 # a self-hosted NIM container exposes the same shape on its own host:port.
@@ -42,6 +60,7 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
+        _load_env()
         return cls(
             api_key=os.getenv("NVIDIA_API_KEY"),
             base_url=os.getenv("VLM_BASE_URL", DEFAULT_BASE_URL),

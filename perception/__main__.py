@@ -8,13 +8,8 @@ from .config import Config
 from .prompts import EVENT_TYPES
 from . import pipeline
 
-# Load a local .env if python-dotenv is available (optional convenience).
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv()
-except Exception:
-    pass
+# perception/.env is loaded by Config.from_env() (by absolute path, so it works
+# from any working directory).
 
 
 def parse_args(argv=None):

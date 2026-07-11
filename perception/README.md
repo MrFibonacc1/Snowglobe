@@ -9,10 +9,21 @@ and POSTs them to `automation/`'s `/events` endpoint.
 
 ## Run
 
+**One-time setup** (from inside `perception/`):
+
 ```bash
+cd perception
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # fill in NVIDIA_API_KEY (or use --mock)
+```
+
+**Run everything from the REPO ROOT** (`companyH/`), not from `perception/` —
+`perception` has to be importable as a package. Keep the venv activated:
+
+```bash
+cd ..                                   # back to companyH/ (repo root)
+source perception/.venv/bin/activate    # if not already active
 
 # Offline smoke test — no API key, no camera:
 python -m perception.make_test_clip --out demo/synthetic.mp4
@@ -24,13 +35,17 @@ python -m perception --source demo/spill.mp4 --zone zone_b
 
 # Live webcam:
 python -m perception --source webcam --zone zone_a
-```
 
-Serve saved frames so `snapshot_url`s resolve (for the dashboard / H agent):
+# Detect API for the dashboard Testing page:
+python -m perception.server                 # http://localhost:8008
+# (equivalently: uvicorn perception.server:app --port 8008 --app-dir .)
 
-```bash
+# Static host for saved frames (so snapshot_url resolves):
 python -m perception.snapshot_server        # http://localhost:8001/snapshots/...
 ```
+
+`.env` is loaded automatically by absolute path, so the commands above pick up
+your `NVIDIA_API_KEY` from any working directory.
 
 ## Files
 
