@@ -350,10 +350,10 @@ function NewWorkflowDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
+      <DialogContent className="w-[calc(100%-2rem)] gap-0 overflow-hidden sm:max-w-xl">
+        <DialogHeader className="min-w-0">
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="size-4 text-primary" /> New workflow
+            <Sparkles className="size-4 shrink-0 text-primary" /> New workflow
           </DialogTitle>
           <DialogDescription>
             Describe what should happen when the cameras detect something — the AI
@@ -362,7 +362,7 @@ function NewWorkflowDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-3 py-1">
+        <div className="mt-4 flex min-w-0 flex-col gap-3">
           <Textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -370,7 +370,8 @@ function NewWorkflowDialog({
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) build()
             }}
             placeholder="e.g. When there's a spill, have an H agent log the time and location to our Google Doc, then alert #facilities on Slack."
-            rows={4}
+            className="max-h-52 min-h-[7rem] resize-none break-words"
+            rows={5}
             autoFocus
           />
           <div className="flex flex-wrap gap-1.5">
@@ -383,7 +384,7 @@ function NewWorkflowDialog({
                 key={ex}
                 type="button"
                 onClick={() => setDescription(ex)}
-                className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-primary/50 hover:text-foreground"
+                className="max-w-full truncate rounded-full border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-primary/50 hover:text-foreground"
               >
                 {ex}
               </button>
@@ -391,13 +392,22 @@ function NewWorkflowDialog({
           </div>
         </div>
 
-        <DialogFooter className="sm:justify-between">
-          <Button variant="ghost" onClick={onBlank} disabled={busy}>
-            Start from blank
-          </Button>
-          <Button onClick={build} disabled={!valid || busy} className="gap-1.5">
+        <DialogFooter className="mt-5 flex-row flex-wrap items-center gap-2 sm:justify-start">
+          <Button
+            onClick={build}
+            disabled={!valid || busy}
+            className="order-1 gap-1.5 sm:order-2 sm:ml-auto"
+          >
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
             {busy ? 'Building…' : 'Build with AI'}
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={onBlank}
+            disabled={busy}
+            className="order-2 text-muted-foreground sm:order-1"
+          >
+            Start from blank
           </Button>
         </DialogFooter>
       </DialogContent>
