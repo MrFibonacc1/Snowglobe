@@ -145,10 +145,15 @@ export interface ActivityItem {
 export type StepType = 'h_agent' | 'composio' | 'condition' | 'voice' | 'mcp' | 'inventory_adjust'
 
 export interface WorkflowTrigger {
-  event_type: EventType
+  // 'event' (default): fire on a matching detection. 'schedule': fire on cron.
+  type?: 'event' | 'schedule'
+  event_type?: EventType
   zone?: string
-  min_confidence: number
-  cooldown_sec: number
+  min_confidence?: number
+  cooldown_sec?: number
+  // schedule triggers
+  cron?: string
+  lookback_hours?: number
 }
 
 export interface WorkflowStep {

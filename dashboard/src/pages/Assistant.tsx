@@ -9,7 +9,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Sparkles, Send, Loader2, ArrowRight, Bot, Plug, Split, Volume2, Wrench } from 'lucide-react'
+import { Sparkles, Send, Loader2, ArrowRight, Bot, Plug, Split, Volume2, Wrench, Clock } from 'lucide-react'
 
 type Draft = Workflow & { _valid?: boolean; _validation_error?: string }
 type Msg =
@@ -165,16 +165,30 @@ function DraftCard({ draft, onCreate }: { draft: Draft; onCreate: () => void }) 
           )}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge
-            variant="outline"
-            className="gap-1"
-            style={{ color: m.color, borderColor: `${m.color}40` }}
-          >
-            <EventIcon type={draft.trigger.event_type} className="size-3.5" />
-            {draft.trigger.event_type === '*' ? 'Any event' : m.label}
-          </Badge>
-          {draft.trigger.zone && <Badge variant="outline">{draft.trigger.zone}</Badge>}
-          <Badge variant="outline">≥ {Math.round(draft.trigger.min_confidence * 100)}%</Badge>
+          {draft.trigger.type === 'schedule' ? (
+            <>
+              <Badge variant="outline" className="gap-1">
+                <Clock className="size-3.5" /> {draft.trigger.cron ?? 'schedule'}
+              </Badge>
+              <Badge variant="outline">last {draft.trigger.lookback_hours ?? 24}h</Badge>
+              {draft.trigger.event_type && (
+                <Badge variant="outline">{m.label}</Badge>
+              )}
+            </>
+          ) : (
+            <>
+              <Badge
+                variant="outline"
+                className="gap-1"
+                style={{ color: m.color, borderColor: `${m.color}40` }}
+              >
+                <EventIcon type={draft.trigger.event_type ?? '*'} className="size-3.5" />
+                {draft.trigger.event_type === '*' ? 'Any event' : m.label}
+              </Badge>
+              {draft.trigger.zone && <Badge variant="outline">{draft.trigger.zone}</Badge>}
+              <Badge variant="outline">≥ {Math.round((draft.trigger.min_confidence ?? 0.6) * 100)}%</Badge>
+            </>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {draft.steps.map((s: WorkflowStep, i) => {

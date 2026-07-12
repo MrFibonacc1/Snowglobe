@@ -65,7 +65,23 @@ import {
   Zap,
   Sparkles,
   Loader2,
+  Clock,
 } from 'lucide-react'
+
+// Human label for a 5-field cron ("0 9 * * *" → "Daily 09:00").
+function cronLabel(cron?: string): string {
+  if (!cron) return 'schedule'
+  const [min, hour, dom, mon, dow] = cron.trim().split(/\s+/)
+  if (min?.startsWith('*/')) return `every ${min.slice(2)} min`
+  if (min === '*' && hour === '*') return 'every minute'
+  if (hour === '*') return `hourly :${String(min).padStart(2, '0')}`
+  if (dom === '*' && mon === '*' && dow === '*') {
+    const h = Number(hour)
+    const m = Number(min)
+    if (!Number.isNaN(h)) return `daily ${String(h).padStart(2, '0')}:${String(Number.isNaN(m) ? 0 : m).padStart(2, '0')}`
+  }
+  return cron
+}
 
 type StepIcon = ComponentType<{ className?: string; size?: number | string }>
 
@@ -195,16 +211,30 @@ export function WorkflowBuilder({ store }: { store: Store }) {
                   </div>
 
                   <div className="flex flex-wrap gap-1.5">
-                    <Badge
-                      variant="outline"
-                      className="gap-1"
-                      style={{ color: m.color, borderColor: `${m.color}40` }}
-                    >
-                      <EventIcon type={wf.trigger.event_type} className="size-3.5" /> {m.label}
-                    </Badge>
-                    {wf.trigger.zone && <Badge variant="outline">{wf.trigger.zone}</Badge>}
-                    <Badge variant="outline">≥ {Math.round(wf.trigger.min_confidence * 100)}%</Badge>
-                    <Badge variant="outline">{wf.trigger.cooldown_sec}s cooldown</Badge>
+                    {wf.trigger.type === 'schedule' ? (
+                      <>
+                        <Badge variant="outline" className="gap-1">
+                          <Clock className="size-3.5" /> {cronLabel(wf.trigger.cron)}
+                        </Badge>
+                        <Badge variant="outline">last {wf.trigger.lookback_hours ?? 24}h</Badge>
+                        {wf.trigger.event_type && (
+                          <Badge variant="outline">{eventMeta(wf.trigger.event_type).label}</Badge>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <Badge
+                          variant="outline"
+                          className="gap-1"
+                          style={{ color: m.color, borderColor: `${m.color}40` }}
+                        >
+                          <EventIcon type={wf.trigger.event_type ?? '*'} className="size-3.5" /> {m.label}
+                        </Badge>
+                        {wf.trigger.zone && <Badge variant="outline">{wf.trigger.zone}</Badge>}
+                        <Badge variant="outline">≥ {Math.round((wf.trigger.min_confidence ?? 0) * 100)}%</Badge>
+                        <Badge variant="outline">{wf.trigger.cooldown_sec ?? 0}s cooldown</Badge>
+                      </>
+                    )}
                   </div>
 
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -510,6 +540,7 @@ const NODE_TYPES = { trigger: TriggerNode, step: StepNode }
 
 function TriggerNode({ data, selected }: NodeProps) {
   const t = (data as { trigger: Workflow['trigger'] }).trigger
+  const sched = t.type === 'schedule'
   const meta = eventMeta(t.event_type)
   return (
     <div
@@ -519,16 +550,23 @@ function TriggerNode({ data, selected }: NodeProps) {
       )}
     >
       <div className="flex items-center gap-2.5">
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted" style={{ color: meta.color }}>
-          <EventIcon type={t.event_type} className="size-4" />
+        <div
+          className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted"
+          style={sched ? undefined : { color: meta.color }}
+        >
+          {sched ? <Clock className="size-4" /> : <EventIcon type={t.event_type ?? '*'} className="size-4" />}
         </div>
         <div className="min-w-0">
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">When</div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {sched ? 'On schedule' : 'When'}
+          </div>
           <div className="truncate text-sm font-medium">
-            {t.event_type === '*' ? 'Any event' : meta.label}
+            {sched ? cronLabel(t.cron) : t.event_type === '*' ? 'Any event' : meta.label}
           </div>
           <div className="truncate text-xs text-muted-foreground">
-            {t.zone ?? 'any zone'} · ≥{Math.round(t.min_confidence * 100)}%
+            {sched
+              ? `last ${t.lookback_hours ?? 24}h${t.event_type ? ` · ${meta.label}` : ''}`
+              : `${t.zone ?? 'any zone'} · ≥${Math.round((t.min_confidence ?? 0) * 100)}%`}
           </div>
         </div>
       </div>
@@ -772,53 +810,130 @@ function EditorDialog({
               <div className="flex flex-col gap-4">
                 <h3 className="text-sm font-semibold">Trigger</h3>
                 <div className="flex flex-col gap-2">
-                  <Label>Trigger event</Label>
+                  <Label>Runs on</Label>
                   <div className="flex flex-wrap gap-1.5">
-                    <PillToggle selected={triggerData.event_type === '*'} onClick={() => setTrigger({ event_type: '*' })}>
-                      <EventIcon type="*" className="size-3.5" /> Any event
+                    <PillToggle
+                      selected={triggerData.type !== 'schedule'}
+                      onClick={() =>
+                        setTrigger({
+                          type: 'event',
+                          event_type: triggerData.event_type ?? 'spill',
+                          min_confidence: triggerData.min_confidence ?? 0.7,
+                          cooldown_sec: triggerData.cooldown_sec ?? 60,
+                        })
+                      }
+                    >
+                      <Zap className="size-3.5" /> An event
                     </PillToggle>
-                    {[...new Set([...SUGGESTED_EVENT_TYPES, triggerData.event_type])]
-                      .filter((t) => t && t !== '*')
-                      .map((t) => (
-                        <PillToggle key={t} selected={triggerData.event_type === t} onClick={() => setTrigger({ event_type: t })}>
-                          <EventIcon type={t} className="size-3.5" /> {eventMeta(t).label}
-                        </PillToggle>
-                      ))}
+                    <PillToggle
+                      selected={triggerData.type === 'schedule'}
+                      onClick={() =>
+                        setTrigger({
+                          type: 'schedule',
+                          cron: triggerData.cron ?? '0 9 * * *',
+                          lookback_hours: triggerData.lookback_hours ?? 24,
+                        })
+                      }
+                    >
+                      <Clock className="size-3.5" /> A schedule
+                    </PillToggle>
                   </div>
-                  <Input
-                    value={triggerData.event_type === '*' ? '' : triggerData.event_type}
-                    onChange={(e) => {
-                      // Preserve a trailing underscore while typing; trimming it on
-                      // every keystroke turns `item_removed` into `itemremoved`.
-                      const slug = e.target.value.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+/, '')
-                      setTrigger({ event_type: slug || '*' })
-                    }}
-                    placeholder="or type a custom event, e.g. blocked_exit"
-                    className="mt-1"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Event types are open-ended. Type any concern the perception model can surface, or match every event.
-                  </p>
                 </div>
-                <Field label="Zone filter (optional)">
-                  <Input
-                    value={triggerData.zone ?? ''}
-                    onChange={(e) => setTrigger({ zone: e.target.value.trim() || undefined })}
-                    placeholder="any zone"
-                  />
-                </Field>
-                <div className="flex flex-col gap-2">
-                  <Label>Min confidence, {Math.round(triggerData.min_confidence * 100)}%</Label>
-                  <Slider min={0} max={1} step={0.05} value={[triggerData.min_confidence]} onValueChange={([v]) => setTrigger({ min_confidence: v })} />
-                </div>
-                <Field label="Cooldown (seconds)" hint="At most one run per (workflow, zone) per window.">
-                  <Input
-                    type="number"
-                    min={0}
-                    value={triggerData.cooldown_sec}
-                    onChange={(e) => setTrigger({ cooldown_sec: Math.max(0, Number(e.target.value) || 0) })}
-                  />
-                </Field>
+
+                {triggerData.type === 'schedule' ? (
+                  <>
+                    <div className="flex flex-col gap-2">
+                      <Label>Cadence — {cronLabel(triggerData.cron)}</Label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          ['Daily 9am', '0 9 * * *'],
+                          ['Hourly', '0 * * * *'],
+                          ['Every 5 min', '*/5 * * * *'],
+                        ].map(([label, cron]) => (
+                          <PillToggle key={cron} selected={triggerData.cron === cron} onClick={() => setTrigger({ cron })}>
+                            {label}
+                          </PillToggle>
+                        ))}
+                      </div>
+                      <Input
+                        value={triggerData.cron ?? ''}
+                        onChange={(e) => setTrigger({ cron: e.target.value })}
+                        placeholder="cron: min hour dom mon dow (e.g. 0 9 * * *)"
+                        className="mt-1 font-mono text-xs"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Server time. On each run the engine aggregates the log over the lookback window.
+                      </p>
+                    </div>
+                    <Field label="Look back (hours)" hint="How much of the event log each run aggregates.">
+                      <Input
+                        type="number"
+                        min={1}
+                        value={triggerData.lookback_hours ?? 24}
+                        onChange={(e) => setTrigger({ lookback_hours: Math.max(1, Number(e.target.value) || 24) })}
+                      />
+                    </Field>
+                    <Field label="Event filter (optional)" hint="Limit the aggregate to one event type, e.g. foot_traffic. Blank = all events.">
+                      <Input
+                        value={triggerData.event_type ?? ''}
+                        onChange={(e) => {
+                          const slug = e.target.value.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+/, '')
+                          setTrigger({ event_type: slug || undefined })
+                        }}
+                        placeholder="all events"
+                      />
+                    </Field>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex flex-col gap-2">
+                      <Label>Trigger event</Label>
+                      <div className="flex flex-wrap gap-1.5">
+                        <PillToggle selected={triggerData.event_type === '*'} onClick={() => setTrigger({ event_type: '*' })}>
+                          <EventIcon type="*" className="size-3.5" /> Any event
+                        </PillToggle>
+                        {[...new Set([...SUGGESTED_EVENT_TYPES, triggerData.event_type])]
+                          .filter((t) => t && t !== '*')
+                          .map((t) => (
+                            <PillToggle key={t} selected={triggerData.event_type === t} onClick={() => setTrigger({ event_type: t })}>
+                              <EventIcon type={t as string} className="size-3.5" /> {eventMeta(t).label}
+                            </PillToggle>
+                          ))}
+                      </div>
+                      <Input
+                        value={triggerData.event_type === '*' ? '' : triggerData.event_type ?? ''}
+                        onChange={(e) => {
+                          const slug = e.target.value.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+/, '')
+                          setTrigger({ event_type: slug || '*' })
+                        }}
+                        placeholder="or type a custom event, e.g. blocked_exit"
+                        className="mt-1"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Event types are open-ended. Type any concern the perception model can surface, or match every event.
+                      </p>
+                    </div>
+                    <Field label="Zone filter (optional)">
+                      <Input
+                        value={triggerData.zone ?? ''}
+                        onChange={(e) => setTrigger({ zone: e.target.value.trim() || undefined })}
+                        placeholder="any zone"
+                      />
+                    </Field>
+                    <div className="flex flex-col gap-2">
+                      <Label>Min confidence, {Math.round((triggerData.min_confidence ?? 0.6) * 100)}%</Label>
+                      <Slider min={0} max={1} step={0.05} value={[triggerData.min_confidence ?? 0.6]} onValueChange={([v]) => setTrigger({ min_confidence: v })} />
+                    </div>
+                    <Field label="Cooldown (seconds)" hint="At most one run per (workflow, zone) per window.">
+                      <Input
+                        type="number"
+                        min={0}
+                        value={triggerData.cooldown_sec ?? 60}
+                        onChange={(e) => setTrigger({ cooldown_sec: Math.max(0, Number(e.target.value) || 0) })}
+                      />
+                    </Field>
+                  </>
+                )}
               </div>
             ) : selStep ? (
               <div className="flex flex-col gap-4">
