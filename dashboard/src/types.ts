@@ -142,7 +142,7 @@ export interface ActivityItem {
 
 // --- Backend contracts (shared/workflow_schema.json + PLAN.md §Run) --------
 
-export type StepType = 'h_agent' | 'composio' | 'condition' | 'voice' | 'mcp'
+export type StepType = 'h_agent' | 'composio' | 'condition' | 'voice' | 'mcp' | 'inventory_adjust'
 
 export interface WorkflowTrigger {
   event_type: EventType

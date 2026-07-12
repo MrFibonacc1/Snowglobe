@@ -1,0 +1,65 @@
+services:
+  automation:
+    build:
+      context: .
+      dockerfile: automation/Dockerfile
+    env_file:
+      - path: automation/.env
+        required: false
+    environment:
+      AUTOMATION_DB: /data/automation.db
+    ports: ["8000:8000"]
+    volumes: ["automation-data:/data"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  perception:
+    build:
+      context: .
+      dockerfile: perception/Dockerfile
+    env_file:
+      - path: perception/.env
+        required: false
+    environment:
+      AUTOMATION_URL: http://automation:8000
+      SNAPSHOT_BASE_URL: http://localhost:8008
+    ports: ["8008:8008"]
+    volumes: ["perception-snapshots:/app/perception/snapshots"]
+    depends_on:
+      automation: {condition: service_healthy}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8008/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    ports: ["5173:80"]
+    depends_on:
+      automation: {condition: service_healthy}
+      perception: {condition: service_healthy}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    network_mode: host
+    volumes: ["./deploy/edge/go2rtc.yaml:/config/go2rtc.yaml:ro"]
+    restart: unless-stopped
+    profiles: ["camera-gateway"]
+
+volumes:
+  automation-data:
+  perception-snapshots:

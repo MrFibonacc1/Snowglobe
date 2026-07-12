@@ -225,6 +225,14 @@ function StepDetail({ step }: { step: RunStep }) {
       </div>
     )
   }
+  if (step.type === 'inventory_adjust') {
+    return (
+      <div className="text-xs text-muted-foreground">
+        {String(out.sku ?? 'inventory')} · {String(out.before ?? '?')} → {String(out.after ?? '?')}
+        {out.applied === false ? ' · duplicate event ignored' : ''}
+      </div>
+    )
+  }
   return null
 }
 

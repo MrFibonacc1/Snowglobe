@@ -179,5 +179,5 @@ server's `tools/list`). Check the exact tool names/args before the demo.
 | `H_AGENT_TIMEOUT_SEC`, `H_AGENT_POLL_SEC` | real-agent completion budget (default 300s) and polling interval; steps may override with `timeout_sec` |
 | `SURFER_H_CLI_DIR`, `SURFER_H_BIN`, `HAI_MODEL_URL`, `HAI_MODEL_NAME` | legacy surfer_cli |
 | `COMPOSIO_API_KEY`, `COMPOSIO_USER_ID` | real Composio actions |
-| `GRADIUM_API_KEY` | voice step (stretch, not implemented) |
+| `GRADIUM_API_KEY`, `GRADIUM_VOICE_ID`, `VOICE_OUTPUT_DIR` | confirmed Gradium TTS audio generation |
 | `AUTOMATION_DB` | SQLite path override (default `automation/data.db`) |

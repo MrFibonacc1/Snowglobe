@@ -21,6 +21,7 @@ from . import grounding as grounding_mod
 from . import objects as objects_mod
 from . import sampler as sampler_mod
 from . import vlm as vlm_mod
+from shared.event_normalization import is_supported_finding
 
 
 class TrafficAggregator:
@@ -133,6 +134,8 @@ def run(cfg, args) -> int:
                 # thresholding, so grounding can rescue or kill a borderline call.
                 fusion_mod.ground_verdicts(grounder, frame.image, findings)
                 for verdict in findings:
+                    if not is_supported_finding(verdict.event_type, verdict.grounded):
+                        continue
                     if verdict.confidence < args.min_confidence:
                         continue
                     if not cooled_down(verdict.event_type, frame.timestamp):

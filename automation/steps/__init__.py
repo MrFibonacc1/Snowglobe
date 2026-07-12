@@ -1,7 +1,7 @@
 """Step executor registry. Each executor is a sync function
 (config: dict, event: dict) -> dict output; the engine runs it in a thread."""
 
-from steps import composio_step, condition, h_agent, mcp_step, voice
+from steps import composio_step, condition, h_agent, inventory, mcp_step, voice
 
 _EXECUTORS = {
     "h_agent": h_agent.execute,
@@ -9,6 +9,7 @@ _EXECUTORS = {
     "condition": condition.execute,
     "voice": voice.execute,
     "mcp": mcp_step.execute,
+    "inventory_adjust": inventory.execute,
 }
 
 

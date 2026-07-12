@@ -11,7 +11,8 @@ per-step status live:
 - **h_agent** — H Company hosted Agent API (or mock). Real modes fail closed unless the agent reaches a terminal state with a usable answer; dependent steps are skipped on timeout. See [NOTES.md](NOTES.md).
 - **composio** — Slack / Drive / Sheets via Composio SDK; fails unless execution is confirmed. See [NOTES.md](NOTES.md).
 - **condition** — gate on event payload, e.g. `payload.count > 20`.
-- **voice** — Gradium stretch (stub).
+- **inventory_adjust** — idempotent persisted stock changes with before/after counts.
+- **voice** — fail-closed Gradium TTS; stores confirmed audio output.
 
 Contracts: [../shared/event_schema.json](../shared/event_schema.json),
 [../shared/workflow_schema.json](../shared/workflow_schema.json). Two demo

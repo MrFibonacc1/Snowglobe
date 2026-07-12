@@ -70,6 +70,7 @@ type StepIcon = ComponentType<{ className?: string; size?: number | string }>
 const STEP_TYPES: { id: StepType; label: string; icon: StepIcon }[] = [
   { id: 'h_agent', label: 'H Agent', icon: Bot },
   { id: 'mcp', label: 'MCP tool', icon: Wrench },
+  { id: 'inventory_adjust', label: 'Inventory', icon: Wrench },
   { id: 'composio', label: 'Composio', icon: Plug },
   { id: 'condition', label: 'Condition', icon: Split },
   { id: 'voice', label: 'Voice', icon: Volume2 },
@@ -111,6 +112,8 @@ function defaultConfig(type: StepType): Record<string, unknown> {
       return { text: '' }
     case 'mcp':
       return { server_url: '', tool: '', arguments: {} }
+    case 'inventory_adjust':
+      return { sku: 'front-shelf-item', delta: -1 }
   }
 }
 
@@ -389,6 +392,7 @@ function stepSummary(s: WorkflowStep): string {
   if (s.type === 'mcp') return `MCP: ${(s.config.tool as string) || 'tool'}`
   if (s.type === 'composio') return String(s.config.action ?? 'composio')
   if (s.type === 'condition') return 'if …'
+  if (s.type === 'inventory_adjust') return `Stock: ${String(s.config.sku ?? 'SKU')} ${Number(s.config.delta ?? -1)}`
   return 'voice'
 }
 
@@ -685,7 +689,9 @@ function EditorDialog({
                   <Input
                     value={triggerData.event_type === '*' ? '' : triggerData.event_type}
                     onChange={(e) => {
-                      const slug = e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+                      // Preserve a trailing underscore while typing; trimming it on
+                      // every keystroke turns `item_removed` into `itemremoved`.
+                      const slug = e.target.value.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+/, '')
                       setTrigger({ event_type: slug || '*' })
                     }}
                     placeholder="or type a custom event, e.g. blocked_exit"
@@ -1005,6 +1011,23 @@ function StepConfig({
 
   if (step.type === 'mcp') {
     return <McpConfig step={step} onConfig={onConfig} />
+  }
+
+  if (step.type === 'inventory_adjust') {
+    return (
+      <div className="flex flex-col gap-4">
+        <Field label="SKU" hint="A persisted inventory item exposed by the automation API.">
+          <Input value={cfg.sku ?? ''} onChange={(e) => onConfig('sku', e.target.value)} />
+        </Field>
+        <Field label="Quantity change" hint="Use -1 when one item leaves the shelf.">
+          <Input
+            type="number"
+            value={cfg.delta ?? -1}
+            onChange={(e) => onConfig('delta', Number(e.target.value))}
+          />
+        </Field>
+      </div>
+    )
   }
 
   // voice

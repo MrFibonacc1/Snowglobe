@@ -9,8 +9,13 @@ import envload  # noqa: F401  — must be first: loads .env before steps read en
 import asyncio
 import json
 import os
+import sys
 import uuid
 from pathlib import Path
+
+_ROOT = str(Path(__file__).resolve().parents[1])
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 # Load automation/.env (H_AGENT_MODE, HAI_API_KEY, COMPOSIO_API_KEY, …) before
 # importing engine/steps, since some step modules read env at import time.
@@ -31,6 +36,7 @@ import composio_status
 import generate
 import seeds
 import storage
+from shared.event_normalization import normalize_event
 
 _SHARED = os.path.join(os.path.dirname(__file__), "..", "shared")
 with open(os.path.join(_SHARED, "event_schema.json")) as f:
@@ -50,9 +56,21 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup() -> None:
     storage.init()
+    if not storage.list_inventory():
+        storage.upsert_inventory({
+            "sku": "front-shelf-item", "name": "Front shelf item",
+            "quantity": 24, "location": "front_shelf",
+        })
     if not storage.list_workflows():
         for wf in seeds.WORKFLOWS:
             storage.upsert_workflow(wf)
+    else:
+        # This shipped seed previously called an httpbin pizza form and claimed
+        # it was inventory. Replace that known demo workflow with the real,
+        # idempotent inventory action while leaving user workflows untouched.
+        stock = next((wf for wf in seeds.WORKFLOWS if wf["id"] == "wf_stock_update"), None)
+        if stock:
+            storage.upsert_workflow(stock)
 
 
 def _validate(body: dict, schema: dict) -> None:
@@ -66,6 +84,7 @@ def _validate(body: dict, schema: dict) -> None:
 
 @app.post("/events", status_code=202)
 async def post_event(event: dict):
+    event = normalize_event(event)
     _validate(event, EVENT_SCHEMA)
     storage.insert_event(event)
     run_ids = await engine.handle_event(event)
@@ -75,6 +94,23 @@ async def post_event(event: dict):
 @app.get("/events")
 async def get_events(limit: int = 50):
     return storage.list_events(limit)
+
+
+@app.get("/inventory")
+async def get_inventory():
+    return storage.list_inventory()
+
+
+@app.put("/inventory/{sku}")
+async def put_inventory(sku: str, item: dict):
+    record = {**item, "sku": sku}
+    if "quantity" not in record:
+        raise HTTPException(422, detail="quantity required")
+    try:
+        storage.upsert_inventory(record)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
+    return next(value for value in storage.list_inventory() if value["sku"] == sku)
 
 
 # --- workflows ----------------------------------------------------------------

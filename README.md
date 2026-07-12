@@ -22,6 +22,20 @@ demo/          # pre-recorded clips, fake-event scripts
 See [PLAN.md](PLAN.md) for the full architecture, demo flows, timeline, and
 team split.
 
+## One-command runtime
+
+```bash
+make up       # build and supervise dashboard, automation, and perception
+make logs     # follow all service logs
+make down
+```
+
+Docker Compose health-checks each service and restarts failures. Automation's
+SQLite database lives in the named `automation-data` volume, including durable
+workflow cooldown claims and inventory counts, so restarts do not reset them.
+Enable the optional LAN camera gateway with
+`docker compose --profile camera-gateway up --build -d`.
+
 ## Pipeline
 
 video → frame sampler (1 fps) → Cosmos 3 Reasoner via NIM → event normalizer →

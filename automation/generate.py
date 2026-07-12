@@ -57,6 +57,7 @@ Step types and their config:
     Put a condition FIRST when the user says "if busy/quiet/over/under/more than N".
 - mcp -> call any MCP tool. config: { "server_url": "...", "tool": "...", "arguments": {} }
 - voice -> spoken alert. config: { "text": "..." }
+- inventory_adjust -> persisted stock mutation. config: { "sku": "front-shelf-item", "delta": -1 }
 
 Every step needs an "id" (s1, s2, ...) and a "type" and a "config".
 
@@ -137,7 +138,7 @@ def _normalize(wf: dict, description: str) -> dict:
     steps = []
     for i, s in enumerate(wf.get("steps") or [], start=1):
         stype = s.get("type")
-        if stype not in ("h_agent", "composio", "condition", "mcp", "voice"):
+        if stype not in ("h_agent", "composio", "condition", "mcp", "voice", "inventory_adjust"):
             continue
         steps.append({"id": s.get("id") or f"s{i}", "type": stype, "config": s.get("config") or {}})
     if not steps:

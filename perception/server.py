@@ -37,6 +37,7 @@ from . import vlm as vlm_mod
 from .capture import CameraRegistry
 from .config import Config
 from .sampler import Frame, sample_frames
+from shared.event_normalization import is_supported_finding
 
 app = FastAPI(title="snowglobe perception detect API")
 app.add_middleware(
@@ -182,6 +183,8 @@ async def detect(
         fusion_mod.ground_verdicts(_grounder, frame_img, found)
         elapsed_ms = round((time.perf_counter() - t) * 1000)
         for v in found:
+            if not is_supported_finding(v.event_type, v.grounded):
+                continue
             verdicts.append(
                 {
                     "event_type": v.event_type,
@@ -326,6 +329,8 @@ async def detect_video(
         vs = []
         if discovery:
             for v in discovered.get(fr.seq, []):
+                if not is_supported_finding(v.event_type, v.grounded):
+                    continue
                 vs.append({"event_type": v.event_type, "detected": v.detected,
                            "confidence": round(v.confidence, 3),
                            "count": v.count, "detail": v.detail,
@@ -352,6 +357,8 @@ async def detect_video(
         for seq, vs in discovered.items():
             fr = next((f for f in frames if f.seq == seq), None)
             for v in vs:
+                if not is_supported_finding(v.event_type, v.grounded):
+                    continue
                 hits_by_type.setdefault(v.event_type, []).append((fr, v))
     else:
         hits_by_type = {

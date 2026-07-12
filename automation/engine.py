@@ -6,16 +6,11 @@ executors are synchronous (subprocess / SDK calls) and run in a thread.
 
 import asyncio
 import re
-import time
 import uuid
 from datetime import datetime, timezone
 
 import storage
 from steps import execute_step
-
-# (workflow_id, location) -> last fire timestamp. In-memory: restart clears
-# cooldowns, which is fine for a hackathon.
-_last_fire: dict[tuple[str, str], float] = {}
 
 _TEMPLATE_RE = re.compile(r"\{\{\s*(event|steps)\.([a-zA-Z0-9_.]+)\s*\}\}")
 
@@ -59,13 +54,8 @@ def matches(workflow: dict, event: dict) -> bool:
 
 
 def _cooldown_ok(workflow: dict, event: dict) -> bool:
-    key = (workflow["id"], event["location"])
     window = workflow["trigger"].get("cooldown_sec", 0)
-    now = time.time()
-    if now - _last_fire.get(key, 0) < window:
-        return False
-    _last_fire[key] = now
-    return True
+    return storage.claim_cooldown(workflow["id"], event["location"], window)
 
 
 def _new_run(workflow: dict, event: dict) -> dict:

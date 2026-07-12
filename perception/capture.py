@@ -34,6 +34,7 @@ import cv2
 from . import emit as emit_mod
 from . import vlm as vlm_mod
 from .sampler import Frame, _is_file, resolve_source
+from shared.event_normalization import is_supported_finding
 
 # Detections below this confidence are dropped, matching the pipeline/detect
 # defaults. Not part of the camera API surface — a sensible fixed floor.
@@ -339,6 +340,8 @@ class CameraWorker:
             if self._stop.is_set():
                 return  # camera deleted mid-call — no post-stop side effects
             for verdict in findings:
+                if not is_supported_finding(verdict.event_type, verdict.grounded):
+                    continue
                 if verdict.confidence < MIN_CONFIDENCE:
                     continue
                 self._emit(emitter, verdict.event_type, verdict, frame, self.discover_tag)

@@ -16,6 +16,7 @@ import cv2
 import requests
 
 from . import prompts
+from shared.event_normalization import canonical_event_type, slugify_event_type
 
 
 @dataclass
@@ -28,6 +29,7 @@ class Verdict:
     count: int | None = None
     detail: str | None = None
     severity: str | None = None
+    raw_event_type: str | None = None
     # Grounding (object detector) corroboration, filled in by fusion.py:
     #   grounded=True  → the object detector confirmed the finding
     #   grounded=False → we looked for supporting objects and found none
@@ -50,6 +52,8 @@ class Verdict:
             p["detail"] = self.detail
         if self.severity:
             p["severity"] = self.severity
+        if self.raw_event_type and self.raw_event_type != self.event_type:
+            p["raw_event_type"] = self.raw_event_type
         if self.grounded is not None:
             p["grounded"] = self.grounded
         if self.vlm_confidence is not None:
@@ -116,8 +120,7 @@ def _verdict_from_json(event_type: str, data: dict | None, raw: str) -> Verdict:
 
 def _slugify_type(value) -> str:
     """Normalize a model-chosen event type into a stable snake_case slug."""
-    s = re.sub(r"[^a-z0-9]+", "_", str(value or "event").strip().lower())
-    return s.strip("_") or "event"
+    return slugify_event_type(value)
 
 
 def _verdicts_from_discovery(data, raw: str) -> list[Verdict]:
@@ -136,8 +139,10 @@ def _verdicts_from_discovery(data, raw: str) -> list[Verdict]:
         severity = str(item.get("severity", "")).strip().lower()
         if severity == "low":
             continue  # not actionable enough to fire an automation
-        event_type = _slugify_type(item.get("event_type") or item.get("type"))
+        raw_event_type = _slugify_type(item.get("event_type") or item.get("type"))
+        event_type = canonical_event_type(raw_event_type)
         v = _verdict_from_json(event_type, item, raw=raw)
+        v.raw_event_type = raw_event_type
         if severity in ("medium", "high"):
             v.severity = severity
         # Discovery findings are, by definition, detected.
