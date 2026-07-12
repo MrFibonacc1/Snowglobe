@@ -31,10 +31,13 @@ def render(value, event: dict, steps: dict | None = None):
     "Post to Slack: {{steps.s1.answer}}"."""
     roots = {"event": event, "steps": steps or {}}
     if isinstance(value, str):
-        return _TEMPLATE_RE.sub(
-            lambda m: str(_resolve_path(roots[m.group(1)], m.group(2)) or ""),
-            value,
-        )
+        def _sub(m):
+            # Only a missing path (None) becomes ""; falsy-but-real values
+            # (0, 0.0, False) must render as themselves — a quiet-night count
+            # of 0 should read "0 people", not "".
+            resolved = _resolve_path(roots[m.group(1)], m.group(2))
+            return "" if resolved is None else str(resolved)
+        return _TEMPLATE_RE.sub(_sub, value)
     if isinstance(value, dict):
         return {k: render(v, event, steps) for k, v in value.items()}
     if isinstance(value, list):

@@ -99,5 +99,32 @@ class EngineAgentFailureTests(unittest.TestCase):
         self.assertEqual(run["steps"][1]["status"], "skipped")
 
 
+class RenderTests(unittest.TestCase):
+    def test_falsy_values_render_as_themselves(self):
+        # Regression: a quiet-night count of 0 (or 0.0 / False) must not
+        # collapse to "" — only a missing path should.
+        event = {
+            "event_type": "foot_traffic",
+            "location": "zone_a",
+            "confidence": 0.0,
+            "payload": {"count": 0, "busy": False},
+        }
+        self.assertEqual(engine.render("{{event.payload.count}} people", event), "0 people")
+        self.assertEqual(engine.render("conf {{event.confidence}}", event), "conf 0.0")
+        self.assertEqual(engine.render("busy={{event.payload.busy}}", event), "busy=False")
+
+    def test_missing_path_renders_empty(self):
+        event = {"event_type": "spill", "payload": {}}
+        self.assertEqual(engine.render("x={{event.payload.nope}}", event), "x=")
+
+    def test_step_output_chaining(self):
+        event = {"event_type": "spill", "payload": {}}
+        steps = {"s1": {"answer": "42 units low"}}
+        self.assertEqual(
+            engine.render("Report: {{steps.s1.answer}}", event, steps),
+            "Report: 42 units low",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
