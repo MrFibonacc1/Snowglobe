@@ -13,7 +13,9 @@ resolve functions can actually run, and each function raises a clear
 """
 from __future__ import annotations
 
+import socket
 import sys
+from contextlib import contextmanager
 from urllib.parse import urlparse, urlunparse
 
 try:
@@ -29,10 +31,26 @@ except Exception:  # package not installed
 try:
     from onvif import ONVIFCamera
 
+    # zeep backs onvif-zeep; a real operation timeout is wired through its
+    # Transport when available. Guarded independently so an odd install still
+    # falls back to the socket-level bound below.
+    try:
+        from zeep.transports import Transport as _ZeepTransport
+    except Exception:
+        _ZeepTransport = None
+
     _ONVIF_OK = True
 except Exception:  # package not installed
     ONVIFCamera = None
+    _ZeepTransport = None
     _ONVIF_OK = False
+
+# Hard bound on every ONVIF SOAP call. A caller-supplied xaddr can point at a
+# host that accepts TCP but never replies; without a timeout that blocks a
+# FastAPI threadpool worker forever, so ~40 such requests starve the pool and
+# stall every endpoint. Applied via the zeep Transport AND a socket-level
+# fallback so a hang is bounded even if zeep ignores the transport.
+_ONVIF_TIMEOUT = 8.0
 
 # Discovery needs wsdiscovery; resolve needs onvif. AVAILABLE means the common
 # case (probe + resolve) is usable; individual functions still guard on the
@@ -42,6 +60,35 @@ AVAILABLE = _WSD_OK and _ONVIF_OK
 # The ONVIF device service always lives at /onvif/device_service on the xaddr host.
 _ONVIF_TYPE = "NetworkVideoTransmitter"
 _ONVIF_NS = "http://www.onvif.org/ver10/network/wsdl"
+
+
+@contextmanager
+def _bounded_socket():
+    """Bound blocking socket waits to ``_ONVIF_TIMEOUT`` for the duration of the
+    block, restoring the previous default on exit. Backstops the zeep Transport
+    timeout so a wedged host can never hang a worker even if zeep ignores it."""
+    prev = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(_ONVIF_TIMEOUT)
+    try:
+        yield
+    finally:
+        socket.setdefaulttimeout(prev)
+
+
+def _make_camera(host: str, port: int, username: str, password: str):
+    """Build an ONVIFCamera with a zeep Transport that carries a real operation
+    timeout, falling back to the plain constructor if this onvif-zeep version
+    doesn't accept a ``transport=`` kwarg (the socket-level bound still applies).
+    """
+    if _ZeepTransport is not None:
+        transport = _ZeepTransport(
+            timeout=_ONVIF_TIMEOUT, operation_timeout=_ONVIF_TIMEOUT
+        )
+        try:
+            return ONVIFCamera(host, port, username, password, transport=transport)
+        except TypeError:  # installed version lacks a transport= kwarg
+            pass
+    return ONVIFCamera(host, port, username, password)
 
 
 def _xaddr_host_port(xaddr: str) -> tuple[str, int]:
@@ -112,8 +159,9 @@ def _device_info(xaddr: str) -> dict | None:
         return None
     host, port = _xaddr_host_port(xaddr)
     try:
-        cam = ONVIFCamera(host, port, "", "")
-        info = cam.devicemgmt.GetDeviceInformation()
+        with _bounded_socket():
+            cam = _make_camera(host, port, "", "")
+            info = cam.devicemgmt.GetDeviceInformation()
         return {
             "manufacturer": getattr(info, "Manufacturer", None),
             "model": getattr(info, "Model", None),
@@ -140,22 +188,25 @@ def resolve_stream(
         )
 
     host, port = _xaddr_host_port(xaddr)
-    cam = ONVIFCamera(host, port, username, password)
-    media = cam.create_media_service()
+    # Bound every SOAP call below so a host that accepts TCP but never replies
+    # can't wedge the worker (see _ONVIF_TIMEOUT).
+    with _bounded_socket():
+        cam = _make_camera(host, port, username, password)
+        media = cam.create_media_service()
 
-    profiles = media.GetProfiles()
-    if not profiles:
-        raise RuntimeError("camera returned no media profiles")
-    idx = profile_index if 0 <= profile_index < len(profiles) else 0
-    token = profiles[idx].token
+        profiles = media.GetProfiles()
+        if not profiles:
+            raise RuntimeError("camera returned no media profiles")
+        idx = profile_index if 0 <= profile_index < len(profiles) else 0
+        token = profiles[idx].token
 
-    req = media.create_type("GetStreamUri")
-    req.ProfileToken = token
-    req.StreamSetup = {
-        "Stream": "RTP-Unicast",
-        "Transport": {"Protocol": "RTSP"},
-    }
-    uri = media.GetStreamUri(req).Uri
+        req = media.create_type("GetStreamUri")
+        req.ProfileToken = token
+        req.StreamSetup = {
+            "Stream": "RTP-Unicast",
+            "Transport": {"Protocol": "RTSP"},
+        }
+        uri = media.GetStreamUri(req).Uri
     return _embed_credentials(uri, username, password)
 
 

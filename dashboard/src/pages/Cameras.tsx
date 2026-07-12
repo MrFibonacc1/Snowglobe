@@ -251,14 +251,15 @@ function AddCameraDialog({
 
   const pick = (c: DiscoveredCamera) => {
     setPicked(c)
-    setName(discoveredName(c))
+    // Don't clobber a name the user already typed in the manual form.
+    if (!name.trim()) setName(discoveredName(c))
     setUsername('')
     setPassword('')
   }
 
   const backToScan = () => {
+    // Leave the typed name intact — only exit the credentials step.
     setPicked(null)
-    setName('')
   }
 
   const connectResolved = async () => {

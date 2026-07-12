@@ -223,6 +223,7 @@ function backendToCamera(st: CameraState, source: CameraSource, url?: string): C
     frames_sampled: st.frames_sampled,
     events_emitted: st.events_emitted,
     error: st.error ?? null,
+    origin: st.origin ?? null,
   }
 }
 

@@ -14,7 +14,6 @@ import base64
 import os
 import sys
 import tempfile
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -22,7 +21,7 @@ from uuid import uuid4
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
@@ -47,17 +46,16 @@ _cfg = Config.from_env()
 _detectors: dict[bool, object] = {}
 _cameras = CameraRegistry(_cfg)
 
-# Maps a camera id → the unique go2rtc stream key it was registered under, so
-# delete can unregister the exact stream (not one derived from the display name,
-# which could collide with another camera). Guarded by `_gateway_streams_lock`.
-_gateway_streams: dict[str, str] = {}
-_gateway_streams_lock = threading.Lock()
-
 
 @app.on_event("shutdown")
 def _shutdown_cameras():
-    """Stop every capture worker cleanly when the app goes down."""
+    """Stop every capture worker cleanly when the app goes down, then release the
+    go2rtc streams they were routed through so a restart doesn't orphan them."""
+    # Snapshot state before shutdown clears the registry.
+    routed = [c for c in _cameras.list() if c.get("gateway_stream")]
     _cameras.shutdown()
+    for cam in routed:
+        gateway.unregister(cam["gateway_stream"])  # best-effort; never raises
 
 
 def _detector(mock: bool):
@@ -374,6 +372,9 @@ def create_camera(body: CameraCreate):
             origin = body.source
             stream_key = candidate_key
 
+    # Store the stream key atomically with the camera's existence, so a DELETE
+    # that lands right after create can always find and release the exact stream
+    # (no window where the camera is visible but its stream key isn't recorded).
     state = _cameras.create(
         name=body.name,
         source=sample_source,
@@ -383,13 +384,8 @@ def create_camera(body: CameraCreate):
         mock=body.mock,
         automation_url=body.automation_url,
         origin=origin,
+        gateway_stream=stream_key,
     )
-
-    # Record the mapping only for cameras we actually routed, so delete can
-    # unregister the exact stream key.
-    if stream_key is not None:
-        with _gateway_streams_lock:
-            _gateway_streams[state["id"]] = stream_key
 
     return state
 
@@ -425,13 +421,14 @@ def resume_camera(cam_id: str):
 
 @app.delete("/cameras/{cam_id}", status_code=204)
 def delete_camera(cam_id: str):
-    if not _cameras.delete(cam_id):
+    # Read the camera's stream key BEFORE deleting; delete() drops the state.
+    state = _cameras.get(cam_id)
+    if state is None or not _cameras.delete(cam_id):
         raise HTTPException(status_code=404, detail="unknown camera")
-    # Unregister the exact go2rtc stream this camera was routed through (keyed on
-    # its unique id, not the display name, so we never touch another camera's
-    # stream). Only routed cameras have a mapping entry.
-    with _gateway_streams_lock:
-        stream_key = _gateway_streams.pop(cam_id, None)
+    # Unregister the exact go2rtc stream this camera was routed through (its
+    # unique stream key, not one derived from the display name, so we never
+    # touch another camera's stream). Only routed cameras carry a key.
+    stream_key = state.get("gateway_stream")
     if stream_key is not None:
         gateway.unregister(stream_key)  # best-effort; never raises
     return Response(status_code=204)
@@ -457,9 +454,12 @@ class ResolveRequest(BaseModel):
 
 
 @app.get("/discover")
-def discover_cameras(timeout: float = 4.0):
+def discover_cameras(timeout: float = Query(4.0, gt=0, le=15)):
     """WS-Discovery probe for ONVIF cameras on the LAN. Best-effort: missing
-    ONVIF deps or an empty LAN both yield {"cameras": []} — never a 500."""
+    ONVIF deps or an empty LAN both yield {"cameras": []} — never a 500.
+
+    ``timeout`` is clamped to (0, 15] so an out-of-range value (e.g. ?timeout=inf)
+    returns 422 instead of tying up a worker on an unbounded WS-Discovery wait."""
     try:
         cameras = onvif_mod.discover(timeout)
     except Exception as e:  # optional deps / probe failure — degrade to empty

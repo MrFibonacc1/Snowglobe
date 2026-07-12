@@ -101,7 +101,10 @@ export const api = {
 
 export const listCameras = () => preq<CameraState[]>('/cameras')
 export const createCamera = (payload: CameraPayload) =>
-  preq<CameraState>('/cameras', { method: 'POST', body: JSON.stringify(payload) })
+  // Routing through go2rtc means the server can spend up to ~6s on
+  // gateway.available() + gateway.register(), so the client timeout must
+  // comfortably exceed that budget or a phantom local camera gets added.
+  preq<CameraState>('/cameras', { method: 'POST', body: JSON.stringify(payload) }, 10000)
 export const getCamera = (id: string) => preq<CameraState>(`/cameras/${id}`)
 export const pauseCamera = (id: string) =>
   preq<CameraState>(`/cameras/${id}/pause`, { method: 'POST' })
