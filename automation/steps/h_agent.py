@@ -55,6 +55,8 @@ def execute(config: dict, event: dict) -> dict:
     mode = os.environ.get("H_AGENT_MODE", MODE)
     if mode == "agent_api":
         return _run_agent_api(config)
+    if mode == "agent_mcp":
+        return _run_agent_mcp(config)
     if mode == "nemoclaw":
         return _run_nemoclaw(config)
     if mode == "surfer_cli":
@@ -116,6 +118,120 @@ def _run_agent_api(config: dict) -> dict:
         "task": config.get("task"),
         "url": url,
     }
+
+
+# --- agent_mcp: H agents via their official hosted MCP server ---------------
+# The same surface the NemoClaw-sandboxed harness uses (see nemoclaw/SETUP.md):
+# run_agent -> wait_for_session -> share_session on agp.<region>.hcompany.ai/mcp.
+# config extras: "agent" (default HAI_AGENT_NAME), "share": true for a public
+# replay URL (surfaced as agent_view_url in the runs view).
+HAI_MCP_URL = os.environ.get(
+    "HAI_MCP_URL",
+    "https://agp.hcompany.ai/mcp" if _REGION == "us" else "https://agp.eu.hcompany.ai/mcp",
+)
+
+_MCP_RUNNING = {"pending", "running", "starting", "queued", "created", "initializing"}
+
+
+def _run_agent_mcp(config: dict) -> dict:
+    import json as _json
+
+    from steps import mcp_step
+
+    api_key = os.environ.get("HAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("H_AGENT_MODE=agent_mcp but HAI_API_KEY is not set")
+
+    url = config.get("url")
+    instructions = config.get("instructions", "")
+    task = f"Go to {url}. {instructions}" if url else instructions
+    agent = config.get("agent", AGENT_NAME)
+    budget = int(config.get("timeout_sec", TIMEOUT_SEC))
+    started = time.time()
+
+    headers = {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+
+    def tool(client: httpx.Client, name: str, arguments: dict):
+        call = mcp_step._rpc(client, HAI_MCP_URL, "tools/call", {
+            "name": name, "arguments": arguments,
+        })
+        result = call["body"].get("result", {})
+        texts = [c.get("text", "") for c in result.get("content", [])
+                 if c.get("type") == "text"]
+        raw = "\n".join(texts)
+        if result.get("isError"):
+            raise RuntimeError(f"{name} errored: {raw[:300]}")
+        try:
+            parsed = _json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {"text": raw}
+        except (ValueError, TypeError):
+            return {"text": raw}
+
+    with httpx.Client(timeout=120, headers=headers) as client:
+        init = mcp_step._rpc(client, HAI_MCP_URL, "initialize", {
+            "protocolVersion": "2025-03-26",
+            "capabilities": {},
+            "clientInfo": {"name": "snowglobe-automation", "version": "0.1"},
+        })
+        session_hdr = init["headers"].get("mcp-session-id")
+        if session_hdr:
+            client.headers["Mcp-Session-Id"] = session_hdr
+        try:
+            client.post(HAI_MCP_URL, json={
+                "jsonrpc": "2.0", "method": "notifications/initialized",
+            })
+        except httpx.HTTPError:
+            pass
+
+        res = tool(client, "run_agent", {
+            "task": task, "agent": agent, "max_time_s": budget,
+        })
+        session_id = res.get("session_id") or res.get("id")
+        answer = res.get("answer") or res.get("latest_answer") or (
+            res.get("text") if not session_id else None
+        )
+        status = _mcp_status(res)
+
+        # No answer yet -> long-poll the session until answer or budget.
+        while not answer and session_id and time.time() - started < budget:
+            snap = tool(client, "wait_for_session", {
+                "session_id": session_id, "wait": True,
+            })
+            answer = snap.get("answer") or snap.get("latest_answer")
+            status = _mcp_status(snap) or status
+            if answer or (status and status not in _MCP_RUNNING):
+                break
+
+        share_url = None
+        if session_id and config.get("share"):
+            try:
+                sh = tool(client, "share_session", {"session_id": session_id})
+                share_url = sh.get("share_url") or sh.get("url") or sh.get("text")
+            except Exception:  # noqa: BLE001 — sharing is best-effort
+                pass
+
+    return {
+        "backend": "agent_mcp",
+        "agent": agent,
+        "session_id": session_id,
+        "status": status,
+        "answer": answer,
+        "agent_view_url": share_url,  # public replay; runs view links it
+        "duration_sec": round(time.time() - started, 1),
+        "task": config.get("task"),
+        "url": url,
+    }
+
+
+def _mcp_status(obj: dict):
+    st = obj.get("status")
+    if isinstance(st, dict):
+        return st.get("status") or st.get("state")
+    return st
 
 
 # --- nemoclaw (NVIDIA Challenge) -------------------------------------------

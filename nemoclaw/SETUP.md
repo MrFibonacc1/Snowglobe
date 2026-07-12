@@ -70,29 +70,28 @@ Gotchas from H's README:
 - If a call is denied, `openshell term` names the binary that needs adding to
   the policy (theirs: `/opt/hermes/.venv/bin/python3`).
 
-## Snowglobe pipeline integration — ALREADY WORKS
+## Snowglobe pipeline integration — ✅ BUILT AND VERIFIED LIVE
 
-Our generic `mcp` step speaks to the same endpoint the sandboxed harness uses.
-A workflow can run H agents through the official MCP surface today:
+`H_AGENT_MODE=agent_mcp` (steps/h_agent.py) drives H agents through this
+exact MCP surface: `run_agent` → `wait_for_session` long-poll →
+`share_session`. Verified 2026-07-11 night with a real event:
 
-```json
-{ "type": "mcp", "config": {
-    "server_url": "https://agp.eu.hcompany.ai/mcp",
-    "tool": "run_agent",
-    "arguments": {
-      "agent": "h/web-surfer-flash",
-      "task": "Go to <url>. Fill the incident form. Location: {{event.location}}…"
-    } } }
-```
+- spill event → workflow → run_agent(`h/web-surfer-flash`) → answer in 31s
+- public replay URL returned and surfaced as the run's replay link:
+  `https://agp.eu.hcompany.ai/share/api/v1/trajectories/<session>`
 
-Auth: set `MCP_SERVER_TOKEN` to the HAI key in `automation/.env` (the step
-sends it as the Bearer header). Check `run_agent`'s exact argument names with
-a `tools/list` probe before wiring (schema is in the tool description).
+Per-step config extras: `"agent"` (any of the 5 from list_agents),
+`"share": true` (public replay URL), `"timeout_sec"` (long missions).
+Tool schemas (verified): `run_agent{task, agent, max_steps, max_time_s}`,
+`wait_for_session{session_id, wait}`, `share_session{session_id}`.
 
-So the full challenge demo is: **camera event → Snowglobe workflow →
-run_agent → H agent** — and the same `run_agent` invoked from inside the
-NemoClaw sandbox for the judged artifact. `share_session` gives a public
-replay link to show; `send_message` enables mid-run follow-ups.
+So the challenge demo is: **camera event → Snowglobe workflow → run_agent →
+H agent**, and the same `run_agent` invoked from inside the NemoClaw sandbox
+for the judged artifact. `send_message` enables mid-run follow-ups.
+
+The generic `mcp` step can also call these tools directly
+(`MCP_SERVER_TOKEN` = HAI key), but `agent_mcp` handles the poll/share
+lifecycle for you — prefer it for h_agent work.
 
 ## Alternatives kept for reference
 
