@@ -100,6 +100,30 @@ Executor calls `client.tools.execute(slug=…, user_id=…, arguments=…)`. Slu
 Without `COMPOSIO_API_KEY`, actions log their payload and return
 `{"stubbed": true}` — runs still complete, dashboard still animates.
 
+### Verified status (2026-07-11) — ⚠️ key reads but cannot execute
+
+Ran `python test_composio_connection.py` with the provided key:
+- ✅ **AUTH**: key is valid for the management API (lists 6 connected accounts).
+- ✅ **SDK/code path**: our `composio_step.py` call shape matches SDK 0.17.1.
+  Fixed one real bug — 0.17+ requires a toolkit version for manual execution,
+  so we now pass `dangerously_skip_version_check=True`.
+- ❌ **EXECUTE**: `tools.execute` returns **401 "Invalid API key"** even for a
+  no-auth utility tool. So this key can READ but not RUN tools. This is
+  account/key-side, not our code.
+- ❌ **Accounts**: the only ACTIVE connected account is `reddit`. There is **no
+  Slack / Google Sheets / Google Drive** connection — which is what our
+  workflows use.
+
+**To finish (two independent blockers):**
+1. Get a Composio key with **tool-execution** rights (or enable execution on
+   this account/plan) — verify with `test_composio_connection.py` step 3 → OK.
+2. Link the toolkits (one OAuth click each, opens in a browser):
+   `composio connected-accounts link slack` (+ googlesheets, googledrive),
+   done under the same `user_id` our steps use (`COMPOSIO_USER_ID`, default
+   `default`). Existing accounts on this key use `user_id=local`.
+Once both are green, `composio` steps run for real with zero code changes.
+Until then they stay stubbed and the pipeline still demos.
+
 ## MCP step (`steps/mcp_step.py`) — the flexible integration lane
 
 A generic step that calls **any tool on any MCP server** (streamable HTTP):

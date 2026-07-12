@@ -42,10 +42,13 @@ def execute(config: dict, event: dict) -> dict:
     from composio import Composio  # lazy: optional dependency
 
     client = Composio(api_key=api_key)
+    # SDK 0.17+ requires an explicit toolkit version for manual execution;
+    # skip the check so we always run against the latest.
     result = client.tools.execute(
         slug=_SLUGS[action],
         user_id=_USER_ID,
         arguments=arguments,
+        dangerously_skip_version_check=True,
     )
     return {"stubbed": False, "action": action, "result": _summarize(result)}
 

@@ -3,5 +3,6 @@ uvicorn[standard]>=0.32
 jsonschema>=4.23
 httpx>=0.27
 python-dotenv>=1.0
-# Optional — only needed when running real integrations:
-# composio  # pip install composio  (Composio SDK; needs COMPOSIO_API_KEY)
+# Composio SDK for real Slack/Sheets/Drive actions (needs COMPOSIO_API_KEY
+# with tool-execution rights + linked accounts — see NOTES.md).
+composio>=0.17
