@@ -13,6 +13,7 @@ resolve functions can actually run, and each function raises a clear
 """
 from __future__ import annotations
 
+import ipaddress
 import socket
 import sys
 from contextlib import contextmanager
@@ -97,6 +98,35 @@ def _xaddr_host_port(xaddr: str) -> tuple[str, int]:
     host = parsed.hostname or ""
     port = parsed.port or 80
     return host, port
+
+
+def _is_safe_camera_host(host: str) -> bool:
+    """True if `host` resolves to an address a LAN camera could plausibly sit
+    at. Ordinary private ranges (192.168.x, 10.x, 172.16-31.x) are ALLOWED —
+    that's exactly where ONVIF cameras live and the whole point of discovery.
+    What's rejected is loopback/link-local/multicast/unspecified/reserved,
+    since those are never real camera addresses but are exactly what an SSRF
+    payload would target (e.g. cloud metadata at 169.254.169.254, or the
+    perception service's own loopback-bound endpoints) — `resolve_stream`'s
+    xaddr is client-supplied (POST body), unlike `discover`'s, which only ever
+    probes addresses the server's own WS-Discovery multicast turned up."""
+    if not host:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return False
+    for family, _type, _proto, _canon, sockaddr in infos:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if (
+            ip.is_loopback
+            or ip.is_link_local
+            or ip.is_unspecified
+            or ip.is_multicast
+            or ip.is_reserved
+        ):
+            return False
+    return True
 
 
 def discover(timeout: float = 4.0) -> list[dict]:
@@ -187,7 +217,16 @@ def resolve_stream(
             "ONVIF support unavailable: install the 'onvif-zeep' package"
         )
 
+    # xaddr is client-supplied (this endpoint isn't limited to addresses our
+    # own /discover turned up) — reject anything that isn't a plausible LAN
+    # camera address before making any outbound request, so this can't be
+    # used as an SSRF probe against loopback/link-local/internal services.
+    if urlparse(xaddr).scheme not in ("http", "https"):
+        raise RuntimeError(f"unsupported xaddr scheme: {xaddr!r}")
     host, port = _xaddr_host_port(xaddr)
+    if not _is_safe_camera_host(host):
+        raise RuntimeError(f"xaddr host is not a permitted camera address: {host!r}")
+
     # Bound every SOAP call below so a host that accepts TCP but never replies
     # can't wedge the worker (see _ONVIF_TIMEOUT).
     with _bounded_socket():
