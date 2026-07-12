@@ -11,6 +11,7 @@ the model call server-side.
 from __future__ import annotations
 
 import base64
+import asyncio
 import os
 import sys
 import tempfile
@@ -23,7 +24,7 @@ import cv2
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import emit as emit_mod
@@ -47,6 +48,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+async def _offload(func, *args):
+    """Run blocking model/capture work without stalling HTTP streaming."""
+    return await asyncio.to_thread(func, *args)
+
 _cfg = Config.from_env()
 _detectors: dict[bool, object] = {}
 # Object grounding backend. YOLO runs locally inside this service (the working
@@ -59,6 +65,7 @@ else:
     _grounding_kind = "grounding-dino"
 _live = live_mod.LiveManager(_cfg)
 _cameras = CameraRegistry(_cfg)
+_detect_previous_frames: dict[str, np.ndarray] = {}
 
 
 def _grounding_model_name():
@@ -170,20 +177,28 @@ async def detect(
     path = os.path.join(_cfg.snapshot_dir, filename)
     cv2.imwrite(path, frame_img)
     frame = Frame(0, frame_img, ts, path, filename)
+    previous_frame = _detect_previous_frames.get(zone)
+    motion_score = fusion_mod.frame_motion_score(previous_frame, frame_img)
+    _detect_previous_frames[zone] = frame_img
 
     verdicts, emitted = [], []
 
     if discovery:
         t = time.perf_counter()
         try:
-            found = detector.discover(frame_img)
+            def discover_and_ground():
+                found = detector.discover(frame_img)
+                fusion_mod.ground_verdicts(_grounder, frame_img, found)
+                return found
+
+            found = await _offload(discover_and_ground)
         except Exception as e:
             return JSONResponse(status_code=502, content={"error": f"discover failed: {e}"})
-        # Confirm/deny with the fast object detector (no-op if grounding is off).
-        fusion_mod.ground_verdicts(_grounder, frame_img, found)
         elapsed_ms = round((time.perf_counter() - t) * 1000)
         for v in found:
-            if not is_supported_finding(v.event_type, v.grounded):
+            if not is_supported_finding(
+                v.event_type, v.grounded, motion_score, v.objects, v.detail
+            ):
                 continue
             verdicts.append(
                 {
@@ -207,12 +222,13 @@ async def detect(
         return {"kind": "image", "model": discover_tag, "mock": used_mock,
                 "grounding": any(v.get("grounded") is not None for v in verdicts),
                 "grounding_model": _grounding_model_name(),
+                "motion_score": motion_score,
                 "mode": "discover", "verdicts": verdicts, "events": emitted}
 
     for et in requested:
         t = time.perf_counter()
         try:
-            v = detector.detect(frame_img, et)
+            v = await _offload(detector.detect, frame_img, et)
         except Exception as e:  # surface the failure per-event, don't 500 the whole request
             verdicts.append({"event_type": et, "error": str(e)})
             continue
@@ -327,11 +343,19 @@ async def detect_video(
                 pass  # a failed call just leaves that (frame, event) missing
 
     frames_out = []
+    motion_by_seq: dict[int, float | None] = {}
+    previous_image = None
+    for fr in frames:
+        motion_by_seq[fr.seq] = fusion_mod.frame_motion_score(previous_image, fr.image)
+        previous_image = fr.image
     for fr in frames:
         vs = []
         if discovery:
             for v in discovered.get(fr.seq, []):
-                if not is_supported_finding(v.event_type, v.grounded):
+                if not is_supported_finding(
+                    v.event_type, v.grounded, motion_by_seq[fr.seq],
+                    v.objects, v.detail,
+                ):
                     continue
                 vs.append({"event_type": v.event_type, "detected": v.detected,
                            "confidence": round(v.confidence, 3),
@@ -359,7 +383,10 @@ async def detect_video(
         for seq, vs in discovered.items():
             fr = next((f for f in frames if f.seq == seq), None)
             for v in vs:
-                if not is_supported_finding(v.event_type, v.grounded):
+                if fr is None or not is_supported_finding(
+                    v.event_type, v.grounded, motion_by_seq[seq],
+                    v.objects, v.detail,
+                ):
                     continue
                 hits_by_type.setdefault(v.event_type, []).append((fr, v))
     else:
@@ -402,7 +429,9 @@ async def detect_video(
 
 class CameraCreate(BaseModel):
     """Request body for POST /cameras. `source` accepts "webcam", an integer
-    index string, an rtsp:// or http(s):// URL, or a file path."""
+    index string, an rtsp:// or http(s):// URL, a file path, or
+    ``screen[:X,Y,W,H]`` for a desktop region, or ``window:App Name`` for a
+    specific macOS application window."""
 
     name: str
     source: str
@@ -460,17 +489,20 @@ def create_camera(body: CameraCreate):
     # Store the stream key atomically with the camera's existence, so a DELETE
     # that lands right after create can always find and release the exact stream
     # (no window where the camera is visible but its stream key isn't recorded).
-    state = _cameras.create(
-        name=body.name,
-        source=sample_source,
-        zone=body.zone,
-        fps=body.fps,
-        events=body.events,
-        mock=body.mock,
-        automation_url=body.automation_url,
-        origin=origin,
-        gateway_stream=stream_key,
-    )
+    try:
+        state = _cameras.create(
+            name=body.name,
+            source=sample_source,
+            zone=body.zone,
+            fps=body.fps,
+            events=body.events,
+            mock=body.mock,
+            automation_url=body.automation_url,
+            origin=origin,
+            gateway_stream=stream_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return state
 
@@ -527,6 +559,42 @@ def camera_latest(cam_id: str):
     if jpeg is None:
         raise HTTPException(status_code=404, detail="no frame sampled yet")
     return Response(content=jpeg, media_type="image/jpeg")
+
+
+@app.get("/cameras/{cam_id}/stream.mjpg")
+async def camera_stream(cam_id: str):
+    """Persistent low-latency preview stream.
+
+    The browser keeps one connection open and receives each newly captured
+    JPEG, avoiding cache-busted polling and duplicate HTTP requests.
+    """
+    if _cameras.get(cam_id) is None:
+        raise HTTPException(status_code=404, detail="unknown camera")
+
+    async def frames():
+        previous = None
+        while _cameras.get(cam_id) is not None:
+            jpeg = _cameras.latest_jpeg(cam_id)
+            if jpeg is not None and jpeg != previous:
+                previous = jpeg
+                yield (
+                    b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                    + str(len(jpeg)).encode()
+                    + b"\r\n\r\n"
+                    + jpeg
+                    + b"\r\n"
+                )
+            await asyncio.sleep(0.03)
+
+    return StreamingResponse(
+        frames(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 class ResolveRequest(BaseModel):

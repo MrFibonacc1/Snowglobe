@@ -204,6 +204,7 @@ export const deleteCamera = (id: string) =>
 
 // URL of the latest sampled JPEG frame — used for the live camera preview.
 export const cameraSnapshotUrl = (id: string) => `${PERCEPTION_URL}/cameras/${id}/latest.jpg`
+export const cameraStreamUrl = (id: string) => `${PERCEPTION_URL}/cameras/${id}/stream.mjpg`
 
 // --- ONVIF discovery (best-effort, base = PERCEPTION_URL) -------------------
 

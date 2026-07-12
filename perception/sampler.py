@@ -3,6 +3,8 @@ save each sampled frame to disk so it has a stable snapshot_url."""
 from __future__ import annotations
 
 import os
+import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -64,7 +66,55 @@ def _parse_screen(source: str):
     if len(parts) != 4:
         raise ValueError("screen source must be 'screen' or 'screen:X,Y,W,H'")
     x, y, w, h = (int(p.strip()) for p in parts)
+    if w < 64 or h < 64:
+        raise ValueError("screen region must be at least 64x64 pixels")
     return {"left": x, "top": y, "width": w, "height": h}
+
+
+def _parse_window(source: str):
+    """Parse ``window:App Name`` or ``window:App Name:X,Y,W,H``, or return None
+    for another source type.
+
+    The optional ``X,Y,W,H`` crops the captured window down to a sub-rectangle
+    (pixels, in the captured window's own coordinate space — same space as a
+    screenshot of that window) so chrome like Night Owl's top/bottom toolbars
+    can be trimmed off, leaving just the video feed.
+    """
+    if not source.startswith("window:"):
+        return None
+    rest = source[len("window:"):].strip()
+    app_name, _, crop_spec = rest.rpartition(":")
+    if not app_name:
+        app_name, crop_spec = crop_spec, ""
+    if not app_name:
+        raise ValueError("window source requires an app name")
+    crop = None
+    if crop_spec:
+        parts = crop_spec.split(",")
+        if len(parts) != 4:
+            raise ValueError("window crop must be 'X,Y,W,H'")
+        x, y, w, h = (int(p.strip()) for p in parts)
+        if w < 64 or h < 64:
+            raise ValueError("window crop must be at least 64x64 pixels")
+        crop = (x, y, w, h)
+    return app_name, crop
+
+
+def open_source(source: str):
+    """Open any supported source and return ``(capture, resolved)``.
+
+    Keeping this factory shared makes screen capture work identically in the
+    standalone sampler and the dashboard-managed camera workers.
+    """
+    parsed_window = _parse_window(source)
+    if parsed_window is not None:
+        app_name, crop = parsed_window
+        return _WindowCapture(app_name, crop), None
+    screen_region = _parse_screen(source)
+    if screen_region is not None:
+        return _ScreenCapture(screen_region), None
+    resolved = resolve_source(source)
+    return cv2.VideoCapture(resolved), resolved
 
 
 class _ScreenCapture:
@@ -103,6 +153,99 @@ class _ScreenCapture:
         self._opened = False
 
 
+class _WindowCapture:
+    """cv2 capture adapter for one macOS application window.
+
+    ``screencapture -l`` asks WindowServer for the window surface directly, so
+    other apps can cover Night Owl without appearing in the captured frame.
+    """
+
+    _FIND_WINDOW_SWIFT = r'''
+import CoreGraphics
+let wanted = CommandLine.arguments.last ?? ""
+let windows = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as! [[String: Any]]
+var best: (id: Int, area: Double)? = nil
+for window in windows {
+    let owner = window[kCGWindowOwnerName as String] as? String ?? ""
+    guard owner.caseInsensitiveCompare(wanted) == .orderedSame,
+          let number = window[kCGWindowNumber as String] as? Int,
+          let bounds = window[kCGWindowBounds as String] as? [String: Any],
+          let width = bounds["Width"] as? Double,
+          let height = bounds["Height"] as? Double else { continue }
+    let area = width * height
+    if width >= 64, height >= 64, area > (best?.area ?? 0) { best = (number, area) }
+}
+if let best { print(best.id) }
+'''
+
+    def __init__(self, app_name: str, crop: tuple[int, int, int, int] | None = None):
+        self._app_name = app_name
+        self._crop = crop
+        self._window_id = self._find_window_id()
+        tmp = tempfile.NamedTemporaryFile(prefix="snowglobe-window-", suffix=".png", delete=False)
+        self._path = tmp.name
+        tmp.close()
+        self._opened = self._window_id is not None
+
+    def _find_window_id(self) -> int | None:
+        try:
+            result = subprocess.run(
+                ["swift", "-e", self._FIND_WINDOW_SWIFT, self._app_name],
+                capture_output=True, text=True, timeout=15, check=True,
+            )
+            return int(result.stdout.strip()) if result.stdout.strip() else None
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return None
+
+    def isOpened(self) -> bool:
+        return self._opened
+
+    def read(self):
+        if not self._window_id:
+            return False, None
+        try:
+            subprocess.run(
+                ["screencapture", "-x", "-l", str(self._window_id), self._path],
+                capture_output=True, timeout=10, check=True,
+            )
+            image = cv2.imread(self._path, cv2.IMREAD_UNCHANGED)
+            if image is None:
+                return False, None
+            if image.ndim == 3 and image.shape[2] == 4:
+                alpha = image[:, :, 3]
+                points = cv2.findNonZero(alpha)
+                if points is not None:
+                    x, y, w, h = cv2.boundingRect(points)
+                    image = image[y:y + h, x:x + w]
+                image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+            if self._crop:
+                x, y, w, h = self._crop
+                image = image[y:y + h, x:x + w]
+                if image.size == 0:
+                    return False, None
+            # Night Owl's Retina window surface is over 2K wide. The preview
+            # and VLM do not benefit from that many pixels; bounding it avoids
+            # repeated large JPEG encodes/transfers while preserving aspect.
+            if image.shape[1] > 1280:
+                height = max(1, round(image.shape[0] * 1280 / image.shape[1]))
+                image = cv2.resize(image, (1280, height), interpolation=cv2.INTER_AREA)
+            return True, image
+        except (OSError, subprocess.SubprocessError):
+            # Window ids change after an app restart; resolve it once more.
+            self._window_id = self._find_window_id()
+            return False, None
+
+    def get(self, _prop) -> float:
+        return 0.0
+
+    def release(self) -> None:
+        try:
+            os.unlink(self._path)
+        except OSError:
+            pass
+        self._opened = False
+
+
 def sample_frames(
     source: str,
     fps: float = 0.3,
@@ -121,13 +264,7 @@ def sample_frames(
     `should_stop`, if given, is a zero-arg callable polled each iteration; when
     it returns True the generator stops cleanly (used to Pause a live camera).
     """
-    screen_region = _parse_screen(source)
-    if screen_region is not None:
-        cap = _ScreenCapture(screen_region)
-        resolved = None  # sentinel: live, non-file → wall-clock gating
-    else:
-        resolved = resolve_source(source)
-        cap = cv2.VideoCapture(resolved)
+    cap, resolved = open_source(source)
     if not cap.isOpened():
         raise RuntimeError(f"Could not open video source: {source!r}")
 

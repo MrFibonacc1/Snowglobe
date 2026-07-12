@@ -6,7 +6,7 @@
 // and icon for any type at runtime (see constants.ts `eventMeta`).
 export type EventType = string
 
-export type CameraSource = 'webcam' | 'rtsp' | 'file' | 'hls'
+export type CameraSource = 'webcam' | 'window' | 'screen' | 'rtsp' | 'file' | 'hls'
 export type CameraStatus = 'live' | 'connecting' | 'paused' | 'offline' | 'error'
 
 export interface Camera {

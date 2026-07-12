@@ -17,8 +17,23 @@ from __future__ import annotations
 
 import re
 
+import cv2
+
 from .grounding import Detection, GroundingDetector, GroundingUnavailable
 from .vlm import Verdict
+
+
+def frame_motion_score(previous, current) -> float | None:
+    """Normalized low-resolution pixel change between consecutive frames."""
+    if previous is None or current is None:
+        return None
+
+    def thumb(image):
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+        return cv2.resize(gray, (160, 90), interpolation=cv2.INTER_AREA)
+
+    delta = cv2.absdiff(thumb(previous), thumb(current))
+    return round(float(delta.mean() / 255.0), 4)
 
 # Known event slugs → the concrete objects that, if localized, corroborate them.
 # This is a hint map, not a constraint: unknown slugs fall through to the
@@ -46,19 +61,23 @@ _PHRASE_HINTS: dict[str, list[str]] = {
     "intrusion": ["person", "intruder"],
     # Retail object-interaction slugs the discovery prompt now emits. Ground them
     # on the person plus the common merchandise classes YOLO knows.
-    "item_pickup": ["person", "bottle", "cup", "handbag", "backpack", "book"],
-    "item_placed_in_bag": ["person", "backpack", "handbag", "suitcase", "bottle"],
-    "shelf_interaction": ["person", "bottle", "cup", "book"],
-    "object_interaction": ["person", "bottle", "cup", "handbag", "backpack"],
-    "item_removed_from_shelf": ["person", "bottle", "cup", "book"],
-    "item_concealed": ["person", "backpack", "handbag"],
+    # For interactions, only seed the person. The claimed object's noun must
+    # come from the detail sentence below; generic merchandise classes could
+    # otherwise make a laptop confirm a hallucinated sandwich/cookie.
+    "item_pickup": ["person"],
+    "item_placed_in_bag": ["person"],
+    "shelf_interaction": ["person"],
+    "object_interaction": ["person"],
+    "item_removed_from_shelf": ["person"],
+    "item_concealed": ["person"],
 }
 
 # Objects worth pulling out of a free-form detail sentence when we have no hint.
 _KNOWN_OBJECTS = [
     "person", "people", "forklift", "vehicle", "car", "truck", "bag", "backpack",
     "box", "boxes", "spill", "puddle", "fire", "smoke", "weapon", "gun", "knife",
-    "cart", "pallet", "ladder", "door", "hard hat", "helmet",
+    "cart", "pallet", "ladder", "door", "hard hat", "helmet", "bottle",
+    "cup", "can", "book", "laptop", "handbag", "suitcase", "cell phone",
 ]
 
 

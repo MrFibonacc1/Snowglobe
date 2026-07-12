@@ -32,15 +32,11 @@ PRODUCT_CONTEXT = (
     "aggression, a weapon, smoke or fire, an unattended bag, a long queue, "
     "overcrowding, a machine/vehicle too close to a person, an intrusion after "
     "hours, or a rapidly emptying/panicking crowd. "
-    # Object interaction is a first-class signal for retail/warehouse operations.
-    # Framed neutrally and descriptively (never as an accusation) so the model
-    # reports it factually rather than refusing.
-    "ALSO report when a person is physically interacting with merchandise or "
-    "objects: picking up, holding, carrying, placing into a bag/cart/pocket, or "
-    "removing an item from a shelf or display. Describe the interaction and, in "
-    "the detail field, name the specific object involved (e.g. 'person picks a "
-    "bottle off the shelf', 'person places a boxed item into a backpack'). These "
-    "are useful operational signals (restocking, assistance, inventory). "
+    "Also report a visible person physically interacting with merchandise: "
+    "picking up, holding, carrying, placing into a bag/cart, or removing an item "
+    "from a shelf. Name the specific visible object in the detail. These findings "
+    "are treated as hypotheses and will only fire when adjacent-frame motion and "
+    "local object detection independently corroborate them. "
     "Do NOT report inert objects, "
     "decor, or normal scene contents (Christmas trees, furniture, signage, "
     "plants, a person simply standing, shelves, ordinary foot traffic). If the "

@@ -126,6 +126,8 @@ export const CATEGORY_LABEL: Record<IntegrationCategory, string> = {
 
 export const SOURCE_LABEL: Record<CameraSource, string> = {
   webcam: 'Local webcam',
+  window: 'Night Owl Protect CMS',
+  screen: 'Screen region',
   rtsp: 'RTSP / IP camera',
   file: 'Video file',
   hls: 'HLS stream',

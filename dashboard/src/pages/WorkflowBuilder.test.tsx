@@ -15,6 +15,7 @@ describe('WorkflowBuilder', () => {
 
     render(<WorkflowBuilder store={store} />)
     await user.click(screen.getByRole('button', { name: /new workflow/i }))
+    await user.click(screen.getByRole('button', { name: /start from blank/i }))
     await user.type(screen.getByPlaceholderText('Workflow name'), 'Shelf stock update')
     const trigger = screen.getByPlaceholderText(/type a custom event/i)
     await user.clear(trigger)
@@ -39,6 +40,7 @@ describe('WorkflowBuilder', () => {
 
     render(<WorkflowBuilder store={store} />)
     await user.click(screen.getByRole('button', { name: /new workflow/i }))
+    await user.click(screen.getByRole('button', { name: /start from blank/i }))
     await user.type(screen.getByPlaceholderText('Workflow name'), 'Shelf inventory')
     await user.click(screen.getByRole('button', { name: /add step/i }))
     await user.click(screen.getByRole('button', { name: 'Inventory' }))

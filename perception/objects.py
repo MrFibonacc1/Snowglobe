@@ -27,7 +27,7 @@ _CLASS_ALIASES: dict[str, list[str]] = {
     "backpack": ["backpack", "bag", "rucksack"],
     "handbag": ["handbag", "purse", "bag"],
     "suitcase": ["suitcase", "luggage", "bag"],
-    "bottle": ["bottle", "drink", "beverage", "merchandise", "item", "product"],
+    "bottle": ["bottle", "can", "drink", "beverage", "merchandise", "item", "product"],
     "cup": ["cup", "coffee", "drink"],
     "cell phone": ["cell phone", "phone", "mobile", "smartphone"],
     "handbag ": ["handbag"],

@@ -66,6 +66,66 @@ def normalize_event(event: dict) -> dict:
     return normalized
 
 
-def is_supported_finding(event_type: str, grounded: bool | None) -> bool:
-    """High-risk fall alerts require independent visual corroboration."""
-    return canonical_event_type(event_type) != "person_on_ground" or grounded is True
+def is_supported_finding(
+    event_type: str,
+    grounded: bool | None,
+    motion_score: float | None = None,
+    objects: list[dict] | None = None,
+    detail: str | None = None,
+) -> bool:
+    """Fail closed for findings a single still image cannot establish.
+
+    Falls require independent object grounding. Object interactions require
+    both grounding and meaningful change from the preceding frame; a person
+    merely sitting near an object is not evidence of picking it up.
+    """
+    canonical = canonical_event_type(event_type)
+    if canonical == "person_on_ground":
+        # A person box does not establish lying/falling pose.
+        return False
+    if canonical in {"unattended_bag", "unattended_item"}:
+        return grounded is True
+    detail_slug = slugify_event_type(detail or "")
+    temporal_detail = bool(re.search(
+        r"(?:pick|hold|held|carry|carried|place|put|remove|take|took|eat|ate|interact|touch)",
+        detail_slug,
+    ))
+    interaction = temporal_detail or (
+        (canonical.startswith("item_") and canonical != "unattended_item")
+        or any(
+        token in canonical
+        for token in (
+            "item_held", "item_holding", "item_placement", "item_placed",
+            "item_interaction", "object_interaction", "shelf_interaction",
+            "person_interacting",
+        ))
+    )
+    if interaction:
+        if canonical == "item_removed_from_shelf" and not re.search(
+            r"(?:pick|tak|took|remov|grab)", detail_slug,
+        ):
+            # Possession in one frame ("holding/carrying a bag") does not prove
+            # the person just took merchandise from a shelf.
+            return False
+        # Require three independent signals: the VLM described an interaction,
+        # adjacent analyzed frames changed materially, and YOLO localized a
+        # concrete supporting object. For small shelf products YOLO's COCO model
+        # often only resolves the person, so person grounding is valid here;
+        # the motion requirement prevents an idle person from firing.
+        grounded_objects = objects or []
+        needs_item_box = any(
+            token in canonical
+            for token in ("consum", "conceal", "placed_in_bag", "placement")
+        )
+        has_yolo_box = bool(grounded_objects) and (
+            not needs_item_box
+            or any(
+                str(obj.get("phrase", "")).strip().lower()
+                not in {"", "person", "people"}
+                for obj in grounded_objects
+            )
+        )
+        return grounded is True and (motion_score or 0.0) >= 0.03 and has_yolo_box
+    # Open-ended VLM findings are hypotheses. Only independently localized
+    # static findings may become events; ungrounded prose never fires actions.
+    return grounded is True

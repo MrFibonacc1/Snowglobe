@@ -12,7 +12,7 @@ import { ManualEvents } from './ManualEvents'
 import { ConfidenceBar, EventIcon } from '../components/ui-kit'
 import { Upload, Check, Loader2, ShieldCheck, ShieldAlert, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { api, cameraSnapshotUrl } from '../api'
+import { api, cameraSnapshotUrl, cameraStreamUrl } from '../api'
 
 const PERCEPTION_URL =
   (import.meta.env.VITE_PERCEPTION_URL as string | undefined) ?? 'http://localhost:8008'
@@ -174,6 +174,11 @@ export function Testing({ store }: { store: Store }) {
   const [liveError, setLiveError] = useState<string | null>(null)
   const liveFrameSeqRef = useRef(0)
   const liveStartedAtRef = useRef<number | null>(null)
+  // The MJPEG display samples into this single-slot buffer every 500ms.
+  // Analysis consumes only the newest unprocessed frame, so a slow VLM never
+  // creates an ever-growing queue or delays the live display.
+  const latestMjpegFrameRef = useRef<Blob | null>(null)
+  const analyzedMjpegFrameRef = useRef<Blob | null>(null)
   // Browser-camera source: uses getUserMedia (the real permission prompt)
   // instead of the perception service opening a device on its own host —
   // this is what lets a deployed visitor use their own camera.
@@ -251,7 +256,13 @@ export function Testing({ store }: { store: Store }) {
     setLiveError(null)
     liveFrameSeqRef.current = 0
     liveStartedAtRef.current = Date.now()
+    latestMjpegFrameRef.current = null
+    analyzedMjpegFrameRef.current = null
   }, [liveStreaming, browserLive, selectedCam?.id])
+
+  const receiveMjpegFrame = useCallback((blob: Blob) => {
+    latestMjpegFrameRef.current = blob
+  }, [])
 
   // Attach/detach the browser camera's MediaStream to the <video> element.
   useEffect(() => {
@@ -503,6 +514,24 @@ export function Testing({ store }: { store: Store }) {
       return
     }
     try {
+      if (liveStreaming) {
+        const blob = latestMjpegFrameRef.current
+        if (!blob || blob === analyzedMjpegFrameRef.current) {
+          // The analysis loop is intentionally faster than the 500ms sampler
+          // when idle; yield instead of fetching a separate snapshot.
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          return
+        }
+        analyzedMjpegFrameRef.current = blob
+        const snap = new File(
+          [blob],
+          `camera-${selectedCam.id}-mjpeg-frame.jpg`,
+          { type: blob.type || 'image/jpeg' },
+        )
+        await runLiveAnalysisTick(snap, blob)
+        return
+      }
+
       const url = `${cameraSnapshotUrl(selectedCam.id)}?t=${Date.now()}`
       const res = await fetch(url)
       if (!res.ok) {
@@ -514,11 +543,6 @@ export function Testing({ store }: { store: Store }) {
         `camera-${selectedCam.id}-frame.jpg`,
         { type: blob.type || 'image/jpeg' },
       )
-
-      if (liveStreaming) {
-        await runLiveAnalysisTick(snap, blob)
-        return
-      }
 
       store.setTestingError(null)
       store.setTestingResult(null)
@@ -752,7 +776,7 @@ export function Testing({ store }: { store: Store }) {
                 className="max-h-72 w-full object-contain"
               />
             ) : liveStreaming && selectedCam ? (
-              <LiveCameraStream cameraId={selectedCam.id} />
+              <LiveCameraStream cameraId={selectedCam.id} onFrame={receiveMjpegFrame} />
             ) : preview && isVideo ? (
               <VideoWithBoxes
                 src={preview}
@@ -843,7 +867,7 @@ export function Testing({ store }: { store: Store }) {
               </div>
               {liveStreaming && selectedCam ? (
                 <p className="text-xs text-muted-foreground">
-                  Preview above streams continuously (~8 fps). Analysis isn't pinned to any fps —
+                  Preview above uses one continuous low-latency stream. Analysis isn't pinned to any fps —
                   it grabs a fresh screenshot as soon as the previous one finishes, so it goes as
                   fast as the vision model can respond.
                 </p>
@@ -1200,21 +1224,43 @@ function AgentRunCard({ run }: { run: Run }) {
   )
 }
 
-// Ticks its own state on an interval so the smooth preview doesn't re-render
-// the whole Testing page.
-function LiveCameraStream({ cameraId }: { cameraId: string }) {
-  const [tick, setTick] = useState(() => Date.now())
+export function LiveCameraStream({
+  cameraId,
+  onFrame,
+}: {
+  cameraId: string
+  onFrame: (frame: Blob) => void
+}) {
+  const imageRef = useRef<HTMLImageElement>(null)
+  const samplingRef = useRef(false)
 
   useEffect(() => {
-    // ~8fps matches the perception service's own preview refresh rate
-    // (capture.py _PREVIEW_HZ) — polling faster just re-fetches a stale JPEG.
-    const t = setInterval(() => setTick(Date.now()), 125)
-    return () => clearInterval(t)
-  }, [cameraId])
+    const timer = setInterval(() => {
+      const image = imageRef.current
+      if (!image?.naturalWidth || samplingRef.current) return
+      samplingRef.current = true
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      const context = canvas.getContext('2d')
+      if (!context) {
+        samplingRef.current = false
+        return
+      }
+      context.drawImage(image, 0, 0, canvas.width, canvas.height)
+      canvas.toBlob((blob) => {
+        samplingRef.current = false
+        if (blob) onFrame(blob)
+      }, 'image/jpeg', 0.85)
+    }, 500)
+    return () => clearInterval(timer)
+  }, [cameraId, onFrame])
 
   return (
     <img
-      src={`${cameraSnapshotUrl(cameraId)}?t=${tick}`}
+      ref={imageRef}
+      src={cameraStreamUrl(cameraId)}
+      crossOrigin="anonymous"
       alt="live camera preview"
       className="max-h-72 w-full rounded-lg border object-contain"
     />
@@ -1573,7 +1619,7 @@ function VideoResults({ r, minConf }: { r: DetectResult; minConf: number }) {
                 </div>
                 <ConfidenceBar value={s.peak_confidence} color={m.color} className="my-1.5" />
                 <div className="text-xs text-muted-foreground">
-                  peak {Math.round(s.peak_confidence * 100)}% · detected in {s.frames_detected}/
+                  peak model confidence {Math.round(s.peak_confidence * 100)}% · detected in {s.frames_detected}/
                   {s.frames_total} frames
                   {typeof s.count === 'number' && ` · count ${s.count}`}
                 </div>

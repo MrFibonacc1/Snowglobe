@@ -36,6 +36,17 @@ python -m perception --source demo/spill.mp4 --zone zone_b
 # Live webcam:
 python -m perception --source webcam --zone zone_a
 
+# Night Owl Protect (or any visible app): capture the primary display, or only
+# the app's X,Y,width,height region. Run perception on macOS, not in Docker,
+# and grant the terminal Screen Recording permission when prompted.
+python -m perception --source screen --zone security_camera
+python -m perception --source "screen:120,180,1280,720" --zone security_camera
+python -m perception --source "window:Night Owl Protect CMS" --zone security_camera
+# ...or crop out the app's own toolbars, keeping only the video feed. X,Y,W,H
+# are pixels in the captured window's own space (measure them off a screenshot
+# of that window — top-left origin, no need to know its on-screen position).
+python -m perception --source "window:Night Owl Protect CMS:0,80,1280,600" --zone security_camera
+
 # Detect API for the dashboard Testing page:
 python -m perception.server                 # http://localhost:8008
 # (equivalently: uvicorn perception.server:app --port 8008 --app-dir .)

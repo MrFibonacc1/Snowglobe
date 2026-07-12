@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import type { NewCamera, Store } from '../store'
 import type { Camera, CameraSource, DiscoveredCamera, EventType } from '../types'
-import { cameraSnapshotUrl, discoverCameras, resolveCamera } from '../api'
+import { cameraStreamUrl, discoverCameras, resolveCamera } from '../api'
 import { SUGGESTED_EVENT_TYPES, eventMeta, SOURCE_LABEL } from '../constants'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -24,6 +24,8 @@ import { cn } from '@/lib/utils'
 import { Plus, Trash2, Camera as CameraIcon, Radar, Loader2, ChevronLeft } from 'lucide-react'
 
 const SOURCES: { id: CameraSource; d: string }[] = [
+  { id: 'window', d: 'Capture this app only' },
+  { id: 'screen', d: 'Desktop coordinates' },
   { id: 'webcam', d: 'This machine' },
   { id: 'rtsp', d: 'rtsp:// URL' },
   { id: 'hls', d: '.m3u8 stream' },
@@ -47,7 +49,7 @@ export function Cameras({ store }: { store: Store }) {
 
       {store.cameras.length === 0 ? (
         <EmptyState>
-          No cameras yet. Connect a webcam, RTSP feed, or clip to start producing events.
+          No cameras yet. Connect Night Owl, a webcam, RTSP feed, or clip to start producing events.
         </EmptyState>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -90,23 +92,11 @@ function EmptyState({ children }: { children: React.ReactNode }) {
 function CameraCard({ cam, store }: { cam: Camera; store: Store }) {
   const [eventBroken, setEventBroken] = useState(false)
   const [liveBroken, setLiveBroken] = useState(false)
-  // Cache-busting tick that advances ~once per second while the camera is live,
-  // so the perception snapshot below refreshes as a lightweight video preview.
-  const [tick, setTick] = useState(() => Date.now())
-
   const isLive = cam.status === 'live'
 
   useEffect(() => {
     if (!isLive) return
-    setLiveBroken(false) // give the feed a fresh chance whenever it goes live
-    // Perception samples at ~0.3fps, so latest.jpg 404s for the first few
-    // seconds. Retry every tick — clear liveBroken before bumping the cache
-    // key — so a transient 404 can't permanently kill the preview.
-    const t = setInterval(() => {
-      setLiveBroken(false)
-      setTick(Date.now())
-    }, 1000)
-    return () => clearInterval(t)
+    setLiveBroken(false)
   }, [isLive])
 
   // Prefer the live sampled frame; fall back to the latest zone event frame,
@@ -114,7 +104,7 @@ function CameraCard({ cam, store }: { cam: Camera; store: Store }) {
   const eventSnap = store.events.find(
     (e) => e.location === cam.zone && e.snapshot_url,
   )?.snapshot_url
-  const liveSnap = isLive && !liveBroken ? `${cameraSnapshotUrl(cam.id)}?t=${tick}` : undefined
+  const liveSnap = isLive && !liveBroken ? cameraStreamUrl(cam.id) : undefined
   const snap = liveSnap ?? (eventBroken ? undefined : eventSnap)
 
   return (
@@ -208,6 +198,9 @@ function AddCameraDialog({
   const [source, setSource] = useState<CameraSource>('rtsp')
   const [url, setUrl] = useState('')
   const [webcamIndex, setWebcamIndex] = useState('1')
+  const [screenRegion, setScreenRegion] = useState('')
+  const [appName, setAppName] = useState('Night Owl Protect CMS')
+  const [windowCrop, setWindowCrop] = useState('')
   const [detects, setDetects] = useState<EventType[]>([])
   const [customType, setCustomType] = useState('')
   const [useGateway, setUseGateway] = useState(true)
@@ -224,7 +217,23 @@ function AddCameraDialog({
 
   const needsUrl = source === 'rtsp' || source === 'hls'
   const usesWebcamIndex = source === 'webcam'
-  const valid = name.trim() && zone.trim() && (usesWebcamIndex ? webcamIndex.trim() : !needsUrl || url.trim())
+  const usesScreen = source === 'screen'
+  const usesWindow = source === 'window'
+  const screenParts = screenRegion.trim().split(',').map((part) => Number(part.trim()))
+  const screenRegionValid = !screenRegion.trim() || (
+    screenParts.length === 4 &&
+    screenParts.every(Number.isInteger) &&
+    screenParts[2] >= 64 &&
+    screenParts[3] >= 64
+  )
+  const windowCropParts = windowCrop.trim().split(',').map((part) => Number(part.trim()))
+  const windowCropValid = !windowCrop.trim() || (
+    windowCropParts.length === 4 &&
+    windowCropParts.every(Number.isInteger) &&
+    windowCropParts[2] >= 64 &&
+    windowCropParts[3] >= 64
+  )
+  const valid = name.trim() && zone.trim() && screenRegionValid && windowCropValid && (!usesWindow || appName.trim()) && (usesWebcamIndex ? webcamIndex.trim() : !needsUrl || url.trim())
   const credsValid = name.trim() && zone.trim() && username.trim()
 
   const toggle = (t: EventType) =>
@@ -485,6 +494,52 @@ function AddCameraDialog({
               </Field>
             )}
 
+            {usesScreen && (
+              <Field
+                label="Night Owl window region"
+                hint="Optional: X,Y,width,height in screen pixels. Leave blank to capture the entire primary display. Keep Night Owl visible."
+              >
+                <Input
+                  value={screenRegion}
+                  onChange={(e) => setScreenRegion(e.target.value)}
+                  placeholder="e.g. 120,180,1280,720"
+                  aria-label="Night Owl window region"
+                />
+                {!screenRegionValid && (
+                  <span className="text-xs text-destructive">Use X,Y,width,height; width and height must each be at least 64.</span>
+                )}
+              </Field>
+            )}
+
+            {usesWindow && (
+              <>
+                <Field
+                  label="Application name"
+                  hint="Captures this macOS app window directly, even when another window covers it."
+                >
+                  <Input
+                    value={appName}
+                    onChange={(e) => setAppName(e.target.value)}
+                    aria-label="Application name"
+                  />
+                </Field>
+                <Field
+                  label="Crop out toolbars"
+                  hint="Optional: X,Y,width,height in that window's own pixels, so only the video feed shows — not Night Owl's own chrome. Leave blank to capture the whole window."
+                >
+                  <Input
+                    value={windowCrop}
+                    onChange={(e) => setWindowCrop(e.target.value)}
+                    placeholder="e.g. 0,80,1280,600"
+                    aria-label="Crop out toolbars"
+                  />
+                  {!windowCropValid && (
+                    <span className="text-xs text-destructive">Use X,Y,width,height; width and height must each be at least 64.</span>
+                  )}
+                </Field>
+              </>
+            )}
+
             {needsUrl && (
               <>
                 <Field
@@ -542,7 +597,13 @@ function AddCameraDialog({
                   name: name.trim(),
                   zone: zone.trim(),
                   source,
-                  url: usesWebcamIndex ? webcamIndex.trim() : needsUrl ? url.trim() : undefined,
+                  url: usesWebcamIndex
+                    ? webcamIndex.trim()
+                    : usesScreen
+                      ? `screen${screenRegion.trim() ? `:${screenRegion.trim().replace(/\s/g, '')}` : ''}`
+                      : usesWindow
+                        ? `window:${appName.trim()}${windowCrop.trim() ? `:${windowCrop.trim().replace(/\s/g, '')}` : ''}`
+                      : needsUrl ? url.trim() : undefined,
                   fps: 1,
                   detects,
                   ...(needsUrl ? { use_gateway: useGateway } : {}),

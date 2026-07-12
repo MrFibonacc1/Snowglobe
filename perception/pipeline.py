@@ -134,7 +134,10 @@ def run(cfg, args) -> int:
                 # thresholding, so grounding can rescue or kill a borderline call.
                 fusion_mod.ground_verdicts(grounder, frame.image, findings)
                 for verdict in findings:
-                    if not is_supported_finding(verdict.event_type, verdict.grounded):
+                    if not is_supported_finding(
+                        verdict.event_type, verdict.grounded, None,
+                        verdict.objects, verdict.detail,
+                    ):
                         continue
                     if verdict.confidence < args.min_confidence:
                         continue

@@ -95,11 +95,6 @@ class Config:
         # Empty VLM_DISCOVER_MODEL → reuse the primary model for discovery too.
         discover_model = os.getenv("VLM_DISCOVER_MODEL", DEFAULT_DISCOVER_MODEL) or model
         api_key = os.getenv("VLM_API_KEY") or os.getenv("NVIDIA_API_KEY")
-        # Grounding DINO is hosted by NVIDIA and always Bearer-authed with the
-        # NVIDIA key, independent of where the VLM lives (a Baseten VLM key
-        # wouldn't work here, so prefer NVIDIA_API_KEY for grounding).
-        grounding_key = os.getenv("NVIDIA_API_KEY") or api_key
-        grounding_default = "1" if grounding_key else "0"
         return cls(
             api_key=api_key,
             auth_scheme=os.getenv("VLM_AUTH_SCHEME", "bearer").strip().lower(),
@@ -112,13 +107,13 @@ class Config:
             request_timeout=float(os.getenv("VLM_TIMEOUT", "60")),
             temperature=float(os.getenv("VLM_TEMPERATURE", "0.1")),
             max_tokens=int(os.getenv("VLM_MAX_TOKENS", "512")),
-            grounding_enabled=os.getenv("GROUNDING_ENABLED", grounding_default) not in ("0", "false", "False", ""),
+            # Grounding is a required local safety layer. Environment settings
+            # cannot disable or swap it for the deprecated hosted DINO path.
+            grounding_enabled=True,
             grounding_url=os.getenv("GROUNDING_URL", DEFAULT_GROUNDING_URL),
             grounding_threshold=float(os.getenv("GROUNDING_THRESHOLD", "0.3")),
             grounding_timeout=float(os.getenv("GROUNDING_TIMEOUT", "15")),
-            # "yolo" (local, works) or "none". Defaults to yolo since NVIDIA's
-            # hosted DINO is deprecated and unusable.
-            grounding_backend=os.getenv("GROUNDING_BACKEND", "yolo").strip().lower(),
+            grounding_backend="yolo",
             yolo_model=os.getenv("YOLO_MODEL", "yolov8s.pt"),
             yolo_conf=float(os.getenv("YOLO_CONF", "0.25")),
         )

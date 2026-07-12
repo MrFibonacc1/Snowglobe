@@ -17,7 +17,9 @@ def parse_args(argv=None):
     )
     p.add_argument("--source", default="webcam",
                    help="'webcam', a camera index, an rtsp:// URL, a video file path, "
-                        "or 'screen' / 'screen:X,Y,W,H' to capture a screen region")
+                        "'screen[:X,Y,W,H]', or 'window:App Name[:X,Y,W,H]' on macOS "
+                        "(the optional crop trims chrome like Night Owl's toolbars, "
+                        "in the captured window's own pixel space)")
     p.add_argument("--zone", default="zone_a", help="zone identifier stamped on events")
     p.add_argument("--events", default="",
                    help="comma-separated event types to watch for (targeted mode). "

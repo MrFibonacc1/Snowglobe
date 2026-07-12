@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { Cameras } from './Cameras'
 import type { Store } from '../store'
@@ -31,5 +31,14 @@ describe('Cameras', () => {
     expect(screen.getByText('Front shelf')).toBeInTheDocument()
     expect(screen.getByText('3 events today')).toBeInTheDocument()
     expect(screen.getByText('Discover events')).toBeInTheDocument()
+  })
+
+  it('offers Night Owl screen capture as a camera source', () => {
+    render(<Cameras store={store()} />)
+    fireEvent.click(screen.getByRole('button', { name: /connect camera/i }))
+
+    expect(screen.getByText('Night Owl Protect CMS')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Night Owl Protect CMS'))
+    expect(screen.getByLabelText('Application name')).toHaveValue('Night Owl Protect CMS')
   })
 })

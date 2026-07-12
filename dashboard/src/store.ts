@@ -115,6 +115,13 @@ let seq = 0
 const uid = (p: string) => `${p}_${Date.now().toString(36)}${(seq++).toString(36)}`
 const DAY_MS = 24 * 60 * 60 * 1000
 
+// CameraRegistry IDs are process-local and disappear whenever perception
+// restarts. Seed/demo IDs use readable names and local fallback IDs include a
+// timestamp, so this exact shape safely identifies stale backend records.
+export function isBackendCameraId(id: string): boolean {
+  return /^cam_[0-9a-f]{8}$/.test(id)
+}
+
 function rebuildEventsToday(cameras: Camera[], events: AppEvent[]) {
   const cutoff = Date.now() - DAY_MS
   const counts = new Map<string, number>()
@@ -206,10 +213,10 @@ export interface NewCamera {
   use_gateway?: boolean
 }
 
-// The perception service samples rtsp/hls by URL. For local webcam we allow
-// selecting an explicit camera index via `url`, e.g. "1".
+// The perception service samples rtsp/hls by URL. Webcam uses an optional
+// device index; window/screen use their complete source spec via `url`.
 function sourceString(c: NewCamera): string {
-  return ((c.source === 'rtsp' || c.source === 'hls' || c.source === 'webcam') && c.url)
+  return ((c.source === 'rtsp' || c.source === 'hls' || c.source === 'webcam' || c.source === 'screen' || c.source === 'window') && c.url)
     ? c.url
     : c.source
 }
@@ -554,7 +561,14 @@ export function useStore() {
       const byId = new Map(states.map((st) => [st.id, st]))
       const seen = new Set<string>()
       let touched = false
-      const cameras = s.cameras.map((c) => {
+      const retained = s.cameras.filter(
+        (c) =>
+          !isBackendCameraId(c.id) ||
+          byId.has(c.id) ||
+          localCameraIds.current.has(c.id),
+      )
+      if (retained.length !== s.cameras.length) touched = true
+      const cameras = retained.map((c) => {
         const st = byId.get(c.id)
         if (!st) return c
         seen.add(c.id)

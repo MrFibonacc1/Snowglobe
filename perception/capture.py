@@ -32,8 +32,10 @@ from datetime import datetime, timezone
 import cv2
 
 from . import emit as emit_mod
+from . import fusion as fusion_mod
+from .objects import YoloDetector
 from . import vlm as vlm_mod
-from .sampler import Frame, _is_file, resolve_source
+from .sampler import Frame, _is_file, _parse_screen, _parse_window, open_source, resolve_source
 from shared.event_normalization import is_supported_finding
 
 # Detections below this confidence are dropped, matching the pipeline/detect
@@ -140,6 +142,9 @@ class CameraWorker:
         self.discovery = not self.events
         self.model_tag = "mock" if self.use_mock else cfg.model
         self.discover_tag = "mock" if self.use_mock else cfg.discover_model
+        # Live discovery must use the same mandatory local YOLO corroboration
+        # as /detect; otherwise every strict-gated verdict remains ungrounded.
+        self._grounder = YoloDetector(cfg)
 
         self._stop = threading.Event()
         self._paused = threading.Event()
@@ -150,6 +155,7 @@ class CameraWorker:
         self._latest_frame: tuple = ()  # (image, timestamp) or ()
         self._latest_jpeg: bytes | None = None
         self._last_processed_ts: datetime | None = None
+        self._previous_analysis_image = None
 
         self._reader = threading.Thread(
             target=self._run_reader, name=f"{state.id}-reader", daemon=True
@@ -190,10 +196,9 @@ class CameraWorker:
             self.state.set(status=status, error=error)
 
     def _open(self):
-        resolved = resolve_source(self.state.source)
         # Re-assert TCP transport per open in case the process env changed.
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
-        cap = cv2.VideoCapture(resolved)
+        cap, resolved = open_source(self.state.source)
         # Bound the open/read waits where the build supports it, so a dead RTSP
         # host can't wedge the reader forever. Attributes are guarded because
         # older OpenCV builds lack them.
@@ -207,7 +212,11 @@ class CameraWorker:
         return cap, resolved
 
     def _run_reader(self) -> None:
-        is_file = _is_file(resolve_source(self.state.source))
+        is_file = _parse_screen(self.state.source) is None and _parse_window(
+            self.state.source
+        ) is None and _is_file(
+            resolve_source(self.state.source)
+        )
         preview_interval = 1.0 / _PREVIEW_HZ
         backoff = _BACKOFF_START
 
@@ -329,6 +338,8 @@ class CameraWorker:
             self.state.inc(events_emitted=1)
 
     def _process(self, detector, emitter, frame: Frame) -> None:
+        motion_score = fusion_mod.frame_motion_score(self._previous_analysis_image, frame.image)
+        self._previous_analysis_image = frame.image
         # Run detection FIRST; only frames that clear the confidence filter get
         # written to disk (inside _emit), so idle frames leave no snapshot.
         if self.discovery:
@@ -339,8 +350,12 @@ class CameraWorker:
                 return
             if self._stop.is_set():
                 return  # camera deleted mid-call — no post-stop side effects
+            fusion_mod.ground_verdicts(self._grounder, frame.image, findings)
             for verdict in findings:
-                if not is_supported_finding(verdict.event_type, verdict.grounded):
+                if not is_supported_finding(
+                    verdict.event_type, verdict.grounded, motion_score,
+                    verdict.objects, verdict.detail,
+                ):
                     continue
                 if verdict.confidence < MIN_CONFIDENCE:
                     continue
@@ -411,6 +426,11 @@ class CameraRegistry:
         origin: str | None = None,
         gateway_stream: str | None = None,
     ) -> dict:
+        # Parse screen sources before registering/starting a worker. Otherwise
+        # malformed regions fail only inside the reader thread and leave a
+        # permanently broken camera in the registry.
+        _parse_screen(source)
+        _parse_window(source)
         cam_id = "cam_" + uuid.uuid4().hex[:8]
         state = CameraState(
             id=cam_id, name=name, source=source, zone=zone,
