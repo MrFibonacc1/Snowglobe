@@ -105,5 +105,18 @@ class AgentApiCompletionTests(unittest.TestCase):
         self.assertEqual(output["answer"], "Finished during the budget boundary.")
 
 
+class ModeValidationTests(unittest.TestCase):
+    def test_unknown_mode_raises_instead_of_silent_mock(self):
+        # A misspelled mode used to fall through to a fake mock "success".
+        with patch.dict(os.environ, {"H_AGENT_MODE": "agent_mpc"}, clear=False):
+            with self.assertRaisesRegex(RuntimeError, "unknown H_AGENT_MODE"):
+                h_agent.execute({"task": "custom_url"}, {})
+
+    def test_explicit_mock_mode_still_works(self):
+        with patch.dict(os.environ, {"H_AGENT_MODE": "mock"}, clear=False):
+            out = h_agent.execute({"task": "ticket", "url": "http://x"}, {})
+        self.assertEqual(out["backend"], "mock")
+
+
 if __name__ == "__main__":
     unittest.main()

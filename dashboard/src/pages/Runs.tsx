@@ -61,11 +61,10 @@ function RunCard({ run }: { run: Run }) {
             <div>
               <div className="text-sm font-semibold">{run.workflow_name ?? run.workflow_id}</div>
               <div className="text-xs text-muted-foreground">
-                {m?.label ?? run.event.event_type} in {run.event.location} ·{' '}
-                {Math.round(run.event.confidence * 100)}%
+                {m?.label ?? run.event.event_type} in {run.event.location}
               </div>
               <div className="mt-1">
-                <GroundingBadge payload={run.event.payload} />
+                <GroundingBadge payload={run.event.payload} confidence={run.event.confidence} />
               </div>
             </div>
           </div>

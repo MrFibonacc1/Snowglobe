@@ -85,8 +85,18 @@ def _require_terminal_answer(output: dict, running_states: set[str]) -> dict:
     return output
 
 
+_VALID_MODES = {"mock", "agent_api", "agent_mcp", "nemoclaw", "surfer_cli"}
+
+
 def execute(config: dict, event: dict) -> dict:
-    mode = os.environ.get("H_AGENT_MODE", MODE)
+    # A misspelled or unknown mode used to fall through to _mock() and return a
+    # fake "success", so a real deployment could silently do nothing. Fail loud.
+    mode = (os.environ.get("H_AGENT_MODE", MODE) or "mock").strip().lower()
+    if mode not in _VALID_MODES:
+        raise RuntimeError(
+            f"unknown H_AGENT_MODE={mode!r}; set one of {sorted(_VALID_MODES)} "
+            "(use 'agent_mcp' for the hosted H agent)"
+        )
     if mode == "agent_api":
         return _run_agent_api(config)
     if mode == "agent_mcp":
