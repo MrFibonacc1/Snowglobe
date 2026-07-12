@@ -104,9 +104,14 @@ type GroundedObject = { phrase?: string; confidence?: number }
  */
 export function GroundingBadge({
   payload,
+  confidence,
   className,
 }: {
   payload?: Record<string, unknown> | null
+  // The fused/effective event confidence. When given, the badge shows how the
+  // model's raw read became the final number (VLM X% → Y%) instead of leaving
+  // two disconnected percentages elsewhere in the UI.
+  confidence?: number
   className?: string
 }) {
   const p = payload ?? {}
@@ -114,33 +119,54 @@ export function GroundingBadge({
   const vlmConf = typeof p.vlm_confidence === 'number' ? (p.vlm_confidence as number) : undefined
   const objects = Array.isArray(p.objects) ? (p.objects as GroundedObject[]) : []
 
-  // No grounding signal at all → nothing extra to say beyond the % shown elsewhere.
-  if (grounded === undefined && vlmConf === undefined) return null
-
   const vlmPct = vlmConf !== undefined ? `${Math.round(vlmConf * 100)}%` : null
+  const fusedPct = confidence !== undefined ? `${Math.round(confidence * 100)}%` : null
+
+  // Nothing to say: no grounding signal and no fused confidence to fall back on.
+  if (grounded === undefined && vlmConf === undefined && fusedPct === null) return null
+
   const objNames = objects
     .map((o) => o.phrase)
     .filter(Boolean)
     .slice(0, 3)
     .join(', ')
 
+  // Detector didn't corroborate AND we know the fused result → tell the whole
+  // story in one badge ("VLM 90% → 54%") rather than two numbers that look like
+  // they contradict.
+  if (grounded === false && vlmPct && fusedPct) {
+    return (
+      <Badge
+        variant="outline"
+        title={`The vision model was ${vlmPct} confident, but the object detector didn't corroborate it, so the effective confidence is ${fusedPct}.`}
+        className={cn('gap-1 font-normal bg-amber-500/10 border-amber-500/40 text-amber-600', className)}
+      >
+        <span className="opacity-80">VLM {vlmPct}</span>
+        <span className="opacity-60">→</span>
+        <span className="font-medium">{fusedPct}</span>
+        <span className="opacity-70">unconfirmed</span>
+      </Badge>
+    )
+  }
+
   let toneClass: string
   let label: string
   if (grounded === true) {
     toneClass = 'bg-emerald-500/10 border-emerald-500/40 text-emerald-600'
-    label = objNames ? `confirmed · ${objNames}` : 'confirmed'
+    label = objNames ? `confirmed · ${objNames}` : 'confirmed by detector'
   } else if (grounded === false) {
     toneClass = 'bg-amber-500/10 border-amber-500/40 text-amber-600'
     label = 'unconfirmed by detector'
   } else {
     toneClass = 'bg-muted border-muted text-muted-foreground'
-    label = 'not grounded'
+    label = 'confidence'
   }
 
+  const lead = vlmPct ? `VLM ${vlmPct}` : fusedPct
   return (
     <Badge variant="outline" className={cn('gap-1 font-normal', toneClass, className)}>
-      {vlmPct && <span className="opacity-80">VLM {vlmPct}</span>}
-      {vlmPct && <span className="opacity-40">·</span>}
+      {lead && <span className="opacity-80">{lead}</span>}
+      {lead && <span className="opacity-40">·</span>}
       <span>{label}</span>
     </Badge>
   )

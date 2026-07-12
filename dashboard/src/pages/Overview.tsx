@@ -21,7 +21,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 
-export function Overview({ store }: { store: Store }) {
+export function Overview({ store, onOpenRun }: { store: Store; onOpenRun?: (id: string) => void }) {
   const liveCams = store.cameras.filter((c) => c.status === 'live').length
   const connectedInts = store.integrations.filter((i) => i.status === 'connected').length
   const enabledAutos = store.workflows.filter((w) => w.enabled).length
@@ -114,7 +114,7 @@ export function Overview({ store }: { store: Store }) {
             {viewerRun ? (
               <AgentBox run={viewerRun} />
             ) : (
-              <AgentActivityList store={store} useRuns={useRuns} />
+              <AgentActivityList store={store} useRuns={useRuns} onOpenRun={onOpenRun} />
             )}
           </CardContent>
         </Card>
@@ -245,14 +245,27 @@ function AgentBox({ run }: { run: Run }) {
   )
 }
 
-function AgentActivityList({ store, useRuns }: { store: Store; useRuns: boolean }) {
+function AgentActivityList({
+  store,
+  useRuns,
+  onOpenRun,
+}: {
+  store: Store
+  useRuns: boolean
+  onOpenRun?: (id: string) => void
+}) {
   if (useRuns) {
     return (
       <div className="flex flex-col divide-y divide-border/60">
         {store.runs.slice(0, 6).map((run) => {
           const done = run.steps.filter((s) => s.status === 'done').length
           return (
-            <div key={run.id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+            <button
+              key={run.id}
+              type="button"
+              onClick={() => onOpenRun?.(run.id)}
+              className="flex w-full items-center gap-3 rounded-md py-2.5 text-left transition first:pt-0 last:pb-0 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
               <RunIcon status={run.status} />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium">
@@ -266,7 +279,7 @@ function AgentActivityList({ store, useRuns }: { store: Store; useRuns: boolean 
               <div className="text-xs text-muted-foreground">
                 {run.started_at ? timeAgo(run.started_at) : ''}
               </div>
-            </div>
+            </button>
           )
         })}
       </div>

@@ -94,11 +94,34 @@ export interface BackendStatus {
   counts: { events: number; workflows: number; runs: number }
 }
 
+export interface ComposioTool {
+  slug: string
+  name: string
+  description: string
+  logo?: string | null
+  categories: string[]
+  tools_count: number
+  no_auth: boolean
+}
+
 export const api = {
   configured: () => Boolean(AUTOMATION_URL),
 
   health: () => req<{ ok: boolean }>('/health'),
-  status: () => req<BackendStatus>('/status'),
+  status: (refresh = false) => req<BackendStatus>(`/status${refresh ? '?refresh=1' : ''}`),
+
+  // Start a Composio OAuth link for a toolkit (slack | googlesheets | googledrive | any slug).
+  // Returns the URL the user opens to authorize; the account then shows in /status.
+  connectComposio: (toolkit: string) =>
+    req<{ toolkit: string; user_id: string; redirect_url: string; connection_id: string | null }>(
+      `/integrations/composio/${toolkit}/connect`,
+      { method: 'POST' },
+      15_000,
+    ),
+
+  // The full Composio toolkit catalog for the Add-integration browser.
+  composioCatalog: () =>
+    req<{ toolkits: ComposioTool[] }>('/integrations/composio/catalog', undefined, 20_000),
 
   // events
   listEvents: (limit = 50) => req<AppEvent[]>(`/events?limit=${limit}`),
