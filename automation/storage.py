@@ -9,16 +9,23 @@ import json
 import os
 import sqlite3
 import time
+from contextlib import contextmanager
+from collections.abc import Iterator
 
 DB_PATH = os.environ.get(
     "AUTOMATION_DB", os.path.join(os.path.dirname(__file__), "data.db")
 )
 
 
-def _conn() -> sqlite3.Connection:
+@contextmanager
+def _conn() -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def init() -> None:

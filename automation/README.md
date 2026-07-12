@@ -12,6 +12,11 @@ per-step status live:
 - **composio** — Slack / Drive / Sheets via Composio SDK; fails unless execution is confirmed. See [NOTES.md](NOTES.md).
 - **condition** — gate on event payload, e.g. `payload.count > 20`.
 - **inventory_adjust** — idempotent persisted stock changes with before/after counts.
+
+H Agent polling performs one final bounded session refresh at the configured
+time-budget boundary. This recovers answers that complete between scheduled
+polls while still failing closed when the session remains active or terminal
+without a usable answer.
 - **voice** — fail-closed Gradium TTS; stores confirmed audio output.
 
 Contracts: [../shared/event_schema.json](../shared/event_schema.json),

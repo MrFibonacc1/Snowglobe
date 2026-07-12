@@ -1023,7 +1023,8 @@ function StepConfig({
           <Input
             type="number"
             value={cfg.delta ?? -1}
-            onChange={(e) => onConfig('delta', Number(e.target.value))}
+            onChange={(e) => onConfig('delta', e.target.value)}
+            onBlur={(e) => onConfig('delta', Number(e.target.value || -1))}
           />
         </Field>
       </div>

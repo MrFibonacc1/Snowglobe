@@ -142,6 +142,16 @@ def _run_agent_api(config: dict) -> dict:
             if last.get("finished_at") or (status and status not in _RUNNING):
                 break
 
+        # A session can finish between the last scheduled poll and the exact
+        # budget boundary. Fetch once more before classifying it as timed out;
+        # this adds only one bounded API request and avoids returning a stale
+        # `running` snapshot when H already has the terminal answer.
+        last_status = ((last.get("status") or {}).get("status") or "").lower()
+        if not last.get("finished_at") and last_status in _RUNNING:
+            final = client.get(f"/sessions/{session_id}")
+            final.raise_for_status()
+            last = final.json()
+
     st = last.get("status") or {}
     return _require_terminal_answer({
         "backend": "agent_api",

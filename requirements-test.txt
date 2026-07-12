@@ -1,0 +1,10 @@
+# Lightweight dependencies needed to execute the local acceptance suites.
+# Production images continue to install their service-specific requirements.
+fastapi>=0.115
+httpx>=0.27
+jsonschema>=4.23
+numpy>=2.0
+opencv-python-headless>=4.10
+python-dotenv>=1.0
+python-multipart>=0.0.9
+requests>=2.32

@@ -44,7 +44,8 @@ class _Client:
 
 class AgentApiCompletionTests(unittest.TestCase):
     def _run(self, snapshot, times):
-        client = _Client([snapshot])
+        snapshots = snapshot if isinstance(snapshot, list) else [snapshot]
+        client = _Client(snapshots)
         with patch.dict(os.environ, {"HAI_API_KEY": "redacted"}, clear=False), patch.object(
             h_agent.httpx, "Client", return_value=client
         ), patch.object(h_agent.time, "sleep"), patch.object(
@@ -62,7 +63,7 @@ class AgentApiCompletionTests(unittest.TestCase):
             "latest_answer": None,
         }
         with self.assertRaisesRegex(RuntimeError, "time budget"):
-            self._run(snapshot, [0, 0, 151, 151])
+            self._run([snapshot, snapshot], [0, 0, 151, 151])
 
     def test_terminal_session_without_answer_raises(self):
         snapshot = {
@@ -84,6 +85,24 @@ class AgentApiCompletionTests(unittest.TestCase):
         output = self._run(snapshot, [0, 0, 1])
         self.assertEqual(output["answer"], "Task completed cleanly.")
         self.assertEqual(output["status"], "completed")
+
+    def test_final_refresh_recovers_completion_at_budget_boundary(self):
+        running = {
+            "id": "session-123",
+            "status": {"status": "running", "steps": 27},
+            "latest_answer": None,
+        }
+        completed = {
+            "id": "session-123",
+            "finished_at": "2026-07-12T00:02:31Z",
+            "status": {"status": "completed", "steps": 28},
+            "latest_answer": "Finished during the budget boundary.",
+        }
+
+        output = self._run([running, completed], [0, 0, 151, 151])
+
+        self.assertEqual(output["status"], "completed")
+        self.assertEqual(output["answer"], "Finished during the budget boundary.")
 
 
 if __name__ == "__main__":

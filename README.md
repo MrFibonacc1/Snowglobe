@@ -36,6 +36,25 @@ workflow cooldown claims and inventory counts, so restarts do not reset them.
 Enable the optional LAN camera gateway with
 `docker compose --profile camera-gateway up --build -d`.
 
+## Local acceptance checks
+
+```bash
+make check
+```
+
+The first run creates an isolated `.venv-check` containing only the Python
+packages needed by the automation and perception acceptance suites. The check
+runs both Python suites, dashboard interaction tests, the production dashboard
+build, and Docker Compose configuration validation.
+
+The following acceptance checks intentionally remain external and must not be
+reported as verified by the local suite:
+
+- a physical ONVIF/RTSP camera on the same LAN;
+- live H Agent and NemoClaw sessions using the intended hosted/GPU runtime;
+- live Gradium voice and third-party MCP destinations;
+- Composio tool execution with linked destination accounts.
+
 ## Pipeline
 
 video → frame sampler (1 fps) → Cosmos 3 Reasoner via NIM → event normalizer →

@@ -1,4 +1,4 @@
-.PHONY: up down logs check
+.PHONY: up down logs setup-check check
 
 up:
 	docker compose up --build -d
@@ -9,8 +9,12 @@ down:
 logs:
 	docker compose logs -f --tail=200
 
-check:
-	python3 -m unittest discover -s automation/tests -v
-	python3 -m unittest discover -s perception/tests -v
-	npm --prefix dashboard run build
-	docker compose config --quiet
+setup-check: .venv-check/.requirements-installed
+
+.venv-check/.requirements-installed: requirements-test.txt
+	@test -x .venv-check/bin/python || python3 -m venv .venv-check
+	@.venv-check/bin/python -m pip install --disable-pip-version-check -q -r requirements-test.txt
+	@touch $@
+
+check: setup-check
+	@./scripts/check-local.sh
