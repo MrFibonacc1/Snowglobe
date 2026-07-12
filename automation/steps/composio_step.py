@@ -44,13 +44,41 @@ def execute(config: dict, event: dict) -> dict:
     client = Composio(api_key=api_key)
     # SDK 0.17+ requires an explicit toolkit version for manual execution;
     # skip the check so we always run against the latest.
-    result = client.tools.execute(
-        slug=_SLUGS[action],
-        user_id=_USER_ID,
-        arguments=arguments,
-        dangerously_skip_version_check=True,
-    )
+    try:
+        result = client.tools.execute(
+            slug=_SLUGS[action],
+            user_id=_USER_ID,
+            arguments=arguments,
+            dangerously_skip_version_check=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # "Not configured yet" conditions (key can't execute, no linked
+        # account) shouldn't fail an otherwise-good run — degrade to a
+        # clearly-labeled stub so e.g. a successful H-agent step still counts.
+        # Genuine bugs (bad args, unknown tool) re-raise.
+        reason = _degradable_reason(str(exc))
+        if reason:
+            print(f"[composio unavailable] {action}: {reason}")
+            return {
+                "stubbed": True,
+                "unavailable": True,
+                "action": action,
+                "reason": reason,
+                "arguments": arguments,
+            }
+        raise
     return {"stubbed": False, "action": action, "result": _summarize(result)}
+
+
+def _degradable_reason(err: str) -> str | None:
+    """Map a Composio error to a short reason if it's a 'not configured yet'
+    condition we should skip past; otherwise None (caller re-raises)."""
+    low = err.lower()
+    if "invalid api key" in low or "401" in low or "unauthorized" in low:
+        return "key lacks tool-execution rights (401) — needs an execution-enabled key"
+    if "no connected account" in low or "not connected" in low or "connection" in low:
+        return "no connected account for this toolkit — link it (see NOTES.md)"
+    return None
 
 
 def _build_arguments(action: str, config: dict) -> dict:

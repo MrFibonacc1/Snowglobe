@@ -108,13 +108,22 @@ Ran `python test_composio_connection.py` with the provided key:
   Fixed one real bug — 0.17+ requires a toolkit version for manual execution,
   so we now pass `dangerously_skip_version_check=True`.
 - ❌ **EXECUTE**: `tools.execute` returns **401 "Invalid API key"** even for a
-  no-auth utility tool. So this key can READ but not RUN tools. This is
-  account/key-side, not our code.
+  no-auth utility tool. Confirmed at the HTTP level: the SAME key + same
+  `x-api-key` header gets **200 on every GET** (`/api/v3.1/connected_accounts`,
+  `/tools/...`) but **401 on `POST /api/v3.1/tools/execute/...`**. Same host
+  (`backend.composio.dev`), so it's not region/URL — the key is scoped to
+  read/management only. No code change (header, version, user_id) can fix it.
 - ❌ **Accounts**: the only ACTIVE connected account is `reddit`. There is **no
   Slack / Google Sheets / Google Drive** connection — which is what our
   workflows use.
 
-**To finish (two independent blockers):**
+**Graceful degradation (added):** on a 401/"not configured" error the
+`composio` step no longer fails the run — it returns
+`{stubbed, unavailable, reason}` and the step is marked `done`, so a workflow's
+H-agent step still succeeds. Genuine errors (bad args, unknown tool) still
+raise. Verified: occupancy workflow → run `done`, composio step `unavailable`.
+
+**To make it actually run (two independent blockers, both user-side):**
 1. Get a Composio key with **tool-execution** rights (or enable execution on
    this account/plan) — verify with `test_composio_connection.py` step 3 → OK.
 2. Link the toolkits (one OAuth click each, opens in a browser):
@@ -122,7 +131,7 @@ Ran `python test_composio_connection.py` with the provided key:
    done under the same `user_id` our steps use (`COMPOSIO_USER_ID`, default
    `default`). Existing accounts on this key use `user_id=local`.
 Once both are green, `composio` steps run for real with zero code changes.
-Until then they stay stubbed and the pipeline still demos.
+Meanwhile the generic `mcp` step is a working alternative (H's MCP verified).
 
 ## MCP step (`steps/mcp_step.py`) — the flexible integration lane
 
