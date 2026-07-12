@@ -15,6 +15,7 @@ import { Overview } from './pages/Overview'
 import { Cameras } from './pages/Cameras'
 import { Integrations } from './pages/Integrations'
 import { WorkflowBuilder } from './pages/WorkflowBuilder'
+import { Assistant } from './pages/Assistant'
 import { Runs } from './pages/Runs'
 import { Events } from './pages/Events'
 import { Testing } from './pages/Testing'
@@ -22,6 +23,7 @@ import { Loader2 } from 'lucide-react'
 
 const TITLES: Record<View, { title: string; sub: string }> = {
   overview: { title: 'Overview', sub: 'Live perception and agent activity at a glance' },
+  assistant: { title: 'AI Builder', sub: 'Describe an automation in plain English — I’ll build the workflow' },
   cameras: { title: 'Cameras', sub: 'Connect and monitor your video sources' },
   integrations: { title: 'Integrations', sub: 'Action targets the agent and Composio can drive' },
   automations: { title: 'Workflows', sub: 'Compose detections into ordered agent + Composio steps' },
@@ -35,7 +37,7 @@ const VIEW_KEY = 'snowglobe.view'
 function readInitialView(): View {
   try {
     const raw = localStorage.getItem(VIEW_KEY)
-    if (raw === 'overview' || raw === 'cameras' || raw === 'integrations' || raw === 'automations' || raw === 'runs' || raw === 'events' || raw === 'testing') {
+    if (raw === 'overview' || raw === 'assistant' || raw === 'cameras' || raw === 'integrations' || raw === 'automations' || raw === 'runs' || raw === 'events' || raw === 'testing') {
       return raw
     }
   } catch {
@@ -105,6 +107,7 @@ export default function App() {
 
         <main className="flex-1 p-4 md:p-6">
           {view === 'overview' && <Overview store={store} />}
+          {view === 'assistant' && <Assistant store={store} onNavigate={setViewWithStorage} />}
           {view === 'cameras' && <Cameras store={store} />}
           {view === 'integrations' && <Integrations store={store} />}
           {view === 'automations' && <WorkflowBuilder store={store} />}

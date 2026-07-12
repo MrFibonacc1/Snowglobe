@@ -27,6 +27,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 import engine
+import generate
 import seeds
 import storage
 
@@ -76,6 +77,24 @@ async def get_events(limit: int = 50):
 
 
 # --- workflows ----------------------------------------------------------------
+
+@app.post("/generate_workflow")
+async def generate_workflow(body: dict):
+    """Natural language → a draft workflow (not saved). The dashboard chat
+    shows it for review; the user saves via POST /workflows."""
+    description = (body or {}).get("description", "")
+    if not description.strip():
+        raise HTTPException(422, detail="description required")
+    wf = await asyncio.to_thread(generate.generate_workflow, description)
+    # Best-effort validate; return regardless so the builder can fix edge cases.
+    try:
+        jsonschema.validate(wf, WORKFLOW_SCHEMA)
+        wf["_valid"] = True
+    except jsonschema.ValidationError as exc:
+        wf["_valid"] = False
+        wf["_validation_error"] = exc.message
+    return wf
+
 
 @app.get("/workflows")
 async def get_workflows():

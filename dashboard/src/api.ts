@@ -34,9 +34,9 @@ export class ApiError extends Error {
   }
 }
 
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
+async function req<T>(path: string, init?: RequestInit, timeoutMs = TIMEOUT_MS): Promise<T> {
   if (!AUTOMATION_URL) throw new ApiError('VITE_AUTOMATION_URL not set')
-  return request<T>(AUTOMATION_URL, path, init)
+  return request<T>(AUTOMATION_URL, path, init, timeoutMs)
 }
 
 // Same best-effort/timeout style as `req`, but pointed at the perception base.
@@ -102,6 +102,13 @@ export const api = {
 
   // workflows
   listWorkflows: () => req<Workflow[]>('/workflows'),
+  // NL → draft workflow (not saved). LLM call, so allow a long timeout.
+  generateWorkflow: (description: string) =>
+    req<Workflow & { _valid?: boolean; _validation_error?: string }>(
+      '/generate_workflow',
+      { method: 'POST', body: JSON.stringify({ description }) },
+      90_000,
+    ),
   createWorkflow: (wf: Omit<Workflow, 'id'> & { id?: string }) =>
     req<Workflow>('/workflows', { method: 'POST', body: JSON.stringify(wf) }),
   updateWorkflow: (id: string, wf: Workflow) =>

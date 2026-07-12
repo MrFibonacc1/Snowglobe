@@ -18,10 +18,12 @@ import {
   Activity,
   List,
   FlaskConical,
+  Sparkles,
 } from 'lucide-react'
 
 export type View =
   | 'overview'
+  | 'assistant'
   | 'cameras'
   | 'integrations'
   | 'automations'
@@ -41,6 +43,7 @@ const NAV: {
   icon: React.ComponentType<{ className?: string }>
 }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutGrid },
+  { id: 'assistant', label: 'AI Builder', icon: Sparkles },
   { id: 'cameras', label: 'Cameras', icon: Camera },
   { id: 'integrations', label: 'Integrations', icon: Plug },
   { id: 'automations', label: 'Workflows', icon: Zap },
