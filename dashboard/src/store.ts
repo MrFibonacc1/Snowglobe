@@ -4,13 +4,24 @@ import type {
   AppEvent,
   Automation,
   Camera,
+  CameraPayload,
+  CameraSource,
+  CameraState,
+  EventType,
   Integration,
   Run,
   RunStep,
   Workflow,
 } from './types'
 import { SUGGESTED_EVENT_TYPES, eventMeta } from './constants'
-import { api } from './api'
+import {
+  api,
+  createCamera,
+  deleteCamera as apiDeleteCamera,
+  listCameras,
+  pauseCamera as apiPauseCamera,
+  resumeCamera as apiResumeCamera,
+} from './api'
 import {
   integrationCatalog,
   seedAutomations,
@@ -113,10 +124,14 @@ function rebuildEventsToday(cameras: Camera[], events: AppEvent[]) {
     counts.set(e.location, (counts.get(e.location) ?? 0) + 1)
   }
 
-  return cameras.map((camera) => ({
-    ...camera,
-    eventsToday: counts.get(camera.zone) ?? 0,
-  }))
+  return cameras.map((camera) =>
+    // Backend-managed cameras get their count from mergeCameraStates (the
+    // backend's events_emitted is the single source of truth); only recompute
+    // for local/mock cameras.
+    camera.events_emitted !== undefined
+      ? camera
+      : { ...camera, eventsToday: counts.get(camera.zone) ?? 0 },
+  )
 }
 
 function normalizeTestingRun(input: unknown): TestingRunState | null {
@@ -171,6 +186,45 @@ function normalizeTestingRuns(input: unknown): Run[] {
       return tb - ta
     })
     .slice(0, SAFE_TESTING_RUN_LIMIT)
+}
+
+// What the "Connect camera" dialog collects, before an id/status is assigned.
+export interface NewCamera {
+  name: string
+  zone: string
+  source: CameraSource
+  url?: string
+  fps: number
+  detects: EventType[]
+  // Route through the go2rtc gateway (perception backend). Omitted → unchanged.
+  use_gateway?: boolean
+}
+
+// The perception service samples an rtsp/hls feed by its URL; for a local
+// webcam or uploaded file the source-type name is the source string.
+function sourceString(c: NewCamera): string {
+  return (c.source === 'rtsp' || c.source === 'hls') && c.url ? c.url : c.source
+}
+
+// Map a backend CameraState onto a dashboard Camera, preserving the UI-only
+// `source`/`url` (the backend collapses these into one free-form string).
+function backendToCamera(st: CameraState, source: CameraSource, url?: string): Camera {
+  return {
+    id: st.id,
+    name: st.name,
+    zone: st.zone,
+    source,
+    url,
+    status: st.status,
+    fps: st.fps,
+    detects: st.events ?? [],
+    eventsToday: st.events_emitted ?? 0,
+    last_frame_at: st.last_frame_at ?? null,
+    frames_sampled: st.frames_sampled,
+    events_emitted: st.events_emitted,
+    error: st.error ?? null,
+    origin: st.origin ?? null,
+  }
 }
 
 export function useStore() {
@@ -348,6 +402,7 @@ export function useStore() {
     mergeEvents(incoming)
   }, [mergeEvents])
 
+
   const refreshRuns = useCallback(async () => {
     if (!api.configured()) return []
     try {
@@ -482,6 +537,41 @@ export function useStore() {
     [testingRun, testingRuns, upsertTestingRun],
   )
 
+  // Merge live camera state from the perception service into any cameras we
+  // already show (matched by id). Leaves seeded/offline demo cameras untouched.
+  const mergeCameraStates = useCallback((states: CameraState[]) => {
+    if (states.length === 0) return
+    setState((s) => {
+      const byId = new Map(states.map((st) => [st.id, st]))
+      const seen = new Set<string>()
+      let touched = false
+      const cameras = s.cameras.map((c) => {
+        const st = byId.get(c.id)
+        if (!st) return c
+        seen.add(c.id)
+        touched = true
+        return {
+          ...c,
+          status: st.status,
+          fps: st.fps,
+          detects: st.events ?? c.detects,
+          eventsToday: st.events_emitted ?? c.eventsToday,
+          last_frame_at: st.last_frame_at ?? null,
+          frames_sampled: st.frames_sampled,
+          events_emitted: st.events_emitted,
+          error: st.error ?? null,
+        }
+      })
+      // Add cameras the backend returns that aren't in local state yet (created
+      // elsewhere / in a prior session), without clobbering matched cameras.
+      const added = states
+        .filter((st) => !seen.has(st.id))
+        .map((st) => backendToCamera(st, 'rtsp'))
+      if (added.length > 0) touched = true
+      return touched ? { ...s, cameras: [...cameras, ...added] } : s
+    })
+  }, [])
+
   // On mount (and whenever the backend is configured), hydrate workflows from
   // the service so the builder edits real data. Also hydrate events/runs so
   // the dashboard starts from live data instead of seeded placeholders.
@@ -570,27 +660,143 @@ export function useStore() {
     }
     }, [live, pushEvent, mergeEvents, markBackend, hydrateRuns])
 
+  // Camera state comes from the perception service, which is independent of the
+  // automation backend and the global `live` toggle — the Cameras page is always
+  // visible, so poll it on its own interval so a `connecting` camera can advance
+  // to `live` without the user flipping Live.
+  useEffect(() => {
+    let stopped = false
+    let inFlight = false
+
+    async function pollCameras() {
+      if (inFlight) return // don't stack overlapping polls behind a slow request
+      inFlight = true
+      try {
+        const cams = await listCameras()
+        if (!stopped) mergeCameraStates(cams)
+      } catch {
+        /* perception offline — keep local camera state */
+      } finally {
+        inFlight = false
+      }
+    }
+
+    pollCameras()
+    const t = setInterval(pollCameras, 2500)
+    return () => {
+      stopped = true
+      clearInterval(t)
+    }
+  }, [mergeCameraStates])
+
   // --- camera mutations --------------------------------------------------
 
-  const addCamera = useCallback((c: Omit<Camera, 'id' | 'eventsToday'>) => {
-    const camera: Camera = { ...c, id: uid('cam'), eventsToday: 0 }
-    setState((s) => ({ ...s, cameras: [...s.cameras, camera] }))
-  }, [])
+  // Connect a camera via the perception service. Best-effort: on any failure we
+  // fall back to a local 'connecting' camera so the demo still works.
+  const connectCamera = useCallback(
+    async (input: NewCamera): Promise<{ online: boolean }> => {
+      const payload: CameraPayload = {
+        name: input.name,
+        zone: input.zone,
+        source: sourceString(input),
+        fps: input.fps,
+        events: input.detects,
+        ...(input.use_gateway !== undefined ? { use_gateway: input.use_gateway } : {}),
+      }
+      try {
+        const st = await createCamera(payload)
+        markBackend(true)
+        const camera = backendToCamera(st, input.source, input.url)
+        setState((s) => ({ ...s, cameras: [...s.cameras, camera] }))
+        return { online: true }
+      } catch {
+        markBackend(false)
+        const camera: Camera = { ...input, id: uid('cam'), status: 'connecting', eventsToday: 0 }
+        setState((s) => ({ ...s, cameras: [...s.cameras, camera] }))
+        return { online: false }
+      }
+    },
+    [markBackend],
+  )
 
-  const removeCamera = useCallback((id: string) => {
-    setState((s) => ({ ...s, cameras: s.cameras.filter((c) => c.id !== id) }))
-  }, [])
+  const removeCamera = useCallback(
+    async (id: string) => {
+      // Capture the camera so a failed DELETE can be reverted — otherwise it
+      // vanishes from the UI while it keeps running on the backend.
+      const removed = stateRef.current.cameras.find((c) => c.id === id)
+      setState((s) => ({ ...s, cameras: s.cameras.filter((c) => c.id !== id) }))
+      try {
+        await apiDeleteCamera(id)
+        markBackend(true)
+      } catch {
+        markBackend(false)
+        // Restore it (keep it visible) so it doesn't orphan on the backend.
+        if (removed) {
+          setState((s) =>
+            s.cameras.some((c) => c.id === id)
+              ? s
+              : { ...s, cameras: [...s.cameras, removed] },
+          )
+        }
+      }
+    },
+    [markBackend],
+  )
 
-  const toggleCamera = useCallback((id: string) => {
-    setState((s) => ({
-      ...s,
-      cameras: s.cameras.map((c) =>
-        c.id === id
-          ? { ...c, status: c.status === 'live' ? 'offline' : 'live' }
-          : c,
-      ),
-    }))
-  }, [])
+  // Reconcile a camera against the state the backend returns (or optimistically
+  // set `fallback` when the perception service is unreachable).
+  const applyCameraMutation = useCallback(
+    async (id: string, call: (id: string) => Promise<CameraState>, fallback: Camera['status']) => {
+      // Remember the pre-mutation status so a failed call can be reverted
+      // rather than left stuck on the optimistic value.
+      const prevStatus = stateRef.current.cameras.find((c) => c.id === id)?.status
+      setState((s) => ({
+        ...s,
+        cameras: s.cameras.map((c) => (c.id === id ? { ...c, status: fallback } : c)),
+      }))
+      try {
+        const st = await call(id)
+        markBackend(true)
+        setState((s) => ({
+          ...s,
+          cameras: s.cameras.map((c) =>
+            c.id === id
+              ? {
+                  ...c,
+                  status: st.status,
+                  fps: st.fps,
+                  eventsToday: st.events_emitted ?? c.eventsToday,
+                  last_frame_at: st.last_frame_at ?? null,
+                  frames_sampled: st.frames_sampled,
+                  events_emitted: st.events_emitted,
+                  error: st.error ?? null,
+                }
+              : c,
+          ),
+        }))
+      } catch {
+        markBackend(false)
+        // Revert the optimistic status so pause/resume doesn't stick on failure.
+        if (prevStatus !== undefined) {
+          setState((s) => ({
+            ...s,
+            cameras: s.cameras.map((c) => (c.id === id ? { ...c, status: prevStatus } : c)),
+          }))
+        }
+      }
+    },
+    [markBackend],
+  )
+
+  const pauseCamera = useCallback(
+    (id: string) => applyCameraMutation(id, apiPauseCamera, 'paused'),
+    [applyCameraMutation],
+  )
+
+  const resumeCamera = useCallback(
+    (id: string) => applyCameraMutation(id, apiResumeCamera, 'live'),
+    [applyCameraMutation],
+  )
 
   const setIntegrationStatus = useCallback(
     (id: string, status: Integration['status'], accountLabel?: string) => {
@@ -748,9 +954,10 @@ export function useStore() {
     live,
     setLive,
     backendOnline,
-    addCamera,
+    connectCamera,
     removeCamera,
-    toggleCamera,
+    pauseCamera,
+    resumeCamera,
     ingestEvents,
     setIntegrationStatus,
     addIntegration,

@@ -14,9 +14,11 @@ export function StatusDot({
   const color =
     status === 'live' || status === 'connected'
       ? 'bg-emerald-500'
-      : status === 'connecting'
+      : status === 'connecting' || status === 'paused'
         ? 'bg-amber-500'
-        : 'bg-muted-foreground/50'
+        : status === 'error'
+          ? 'bg-red-500'
+          : 'bg-muted-foreground/50'
   const pulse = status === 'live' || status === 'connecting'
   return (
     <span className={cn('relative inline-flex size-2 shrink-0', className)}>

@@ -7,7 +7,7 @@
 export type EventType = string
 
 export type CameraSource = 'webcam' | 'rtsp' | 'file' | 'hls'
-export type CameraStatus = 'live' | 'connecting' | 'offline'
+export type CameraStatus = 'live' | 'connecting' | 'paused' | 'offline' | 'error'
 
 export interface Camera {
   id: string
@@ -19,6 +19,75 @@ export interface Camera {
   fps: number
   detects: EventType[]
   eventsToday: number
+  // Backend perception-service fields (present once wired to a real camera).
+  last_frame_at?: string | null
+  frames_sampled?: number
+  events_emitted?: number
+  error?: string | null
+  // Original source before go2rtc normalization (backend-supplied).
+  origin?: string | null
+}
+
+// Camera state as returned by the perception camera-control API. `source` is a
+// free-form string (a stream URL or the source-type name) and detections live
+// under `events` — mapped to the dashboard `Camera` in the store/api layer.
+export interface CameraState {
+  id: string
+  name: string
+  source: string
+  zone: string
+  fps: number
+  events: string[]
+  mock: boolean
+  status: CameraStatus
+  last_frame_at?: string | null
+  frames_sampled?: number
+  events_emitted?: number
+  error?: string | null
+  // Original source before go2rtc normalization, plus the gateway restream URL
+  // (present when the feed is routed through the gateway).
+  origin?: string | null
+  gateway_stream?: string | null
+}
+
+// Body for POST /cameras.
+export interface CameraPayload {
+  name: string
+  source: string
+  zone: string
+  fps: number
+  events: string[]
+  mock?: boolean
+  // Route the feed through the go2rtc gateway (perception backend, best-effort).
+  use_gateway?: boolean
+}
+
+// A camera found on the network via ONVIF discovery (GET /discover).
+export interface DiscoveredCamera {
+  name?: string
+  ip: string
+  xaddr: string
+  manufacturer?: string
+  model?: string
+}
+
+// Response of GET /discover (best-effort; cameras may be empty).
+export interface DiscoverResponse {
+  cameras: DiscoveredCamera[]
+}
+
+// Body for POST /discover/resolve — turns a discovered camera + creds into an
+// rtsp URL.
+export interface ResolveCameraRequest {
+  xaddr: string
+  username: string
+  password: string
+  profile_index?: number
+}
+
+// Response of POST /discover/resolve.
+export interface ResolveCameraResponse {
+  rtsp_url: string
 }
 
 export type IntegrationCategory =

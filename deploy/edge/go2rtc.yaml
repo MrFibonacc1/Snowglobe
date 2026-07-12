@@ -1,0 +1,25 @@
+# go2rtc — camera gateway for the Snowglobe edge agent.
+#
+# Every source below is normalized to rtsp://<host>:8554/<name>, which the
+# perception sampler consumes. Cameras can also be added at runtime by the
+# dashboard "Connect camera" flow (POST /cameras registers them via the go2rtc
+# REST API), so this file is optional — use it for cameras you want pinned.
+
+api:
+  listen: ":1984"     # REST API (GO2RTC_URL) — the dashboard/perception register here
+
+rtsp:
+  listen: ":8554"     # normalized RTSP out (GO2RTC_RTSP) — the sampler reads here
+
+webrtc:
+  listen: ":8555"     # optional: sub-second preview in the browser
+
+streams:
+  # --- ONVIF / RTSP tier (Hikvision, Dahua, Amcrest, Reolink, NVR kits) ---
+  # front_door: rtsp://user:pass@192.168.1.64:554/Streaming/Channels/101              # Hikvision
+  # register:   rtsp://user:pass@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0 # Dahua / Amcrest
+  # onvif_auto: onvif://user:pass@192.168.1.64                                        # ONVIF auto-resolve
+
+  # --- Cloud-locked tier (best-effort bridges; see go2rtc docs) ---
+  # counter: wyze:CAMERA_NAME     # needs WYZE_EMAIL / WYZE_PASSWORD env
+  # patio:   nest:DEVICE_ID       # Google Smart Device Management

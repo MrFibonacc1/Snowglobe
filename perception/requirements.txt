@@ -25,3 +25,7 @@ torchvision==0.28.0
 requests==2.34.2
 python-dotenv==1.2.2
 jsonschema==4.26.0
+
+# optional: ONVIF discovery (perception/onvif.py) — camera auto-discovery + RTSP resolution
+wsdiscovery>=2.0
+onvif-zeep>=0.2.12
