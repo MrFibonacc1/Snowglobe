@@ -30,16 +30,39 @@ const TITLES: Record<View, { title: string; sub: string }> = {
   testing: { title: 'Testing', sub: 'Upload an image and run detection through the perception model' },
 }
 
+const VIEW_KEY = 'snowglobe.view'
+
+function readInitialView(): View {
+  try {
+    const raw = localStorage.getItem(VIEW_KEY)
+    if (raw === 'overview' || raw === 'cameras' || raw === 'integrations' || raw === 'automations' || raw === 'runs' || raw === 'events' || raw === 'testing') {
+      return raw
+    }
+  } catch {
+    /* ignore */
+  }
+  return 'overview'
+}
+
 export default function App() {
   const store = useStore()
-  const [view, setView] = useState<View>('overview')
+  const [view, setView] = useState<View>(readInitialView)
   const { title, sub } = TITLES[view]
+
+  const setViewWithStorage = (nextView: View) => {
+    try {
+      localStorage.setItem(VIEW_KEY, nextView)
+    } catch {
+      /* storage unavailable or private mode */
+    }
+    setView(nextView)
+  }
 
   return (
     <SidebarProvider>
       <AppSidebar
         view={view}
-        onChange={setView}
+        onChange={setViewWithStorage}
         counts={{
           cameras: store.cameras.length,
           integrations: store.integrations.filter((i) => i.status === 'connected').length,

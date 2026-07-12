@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AppEvent, EventType } from '../types'
 import type { Store } from '../store'
 import { SUGGESTED_EVENT_TYPES, eventMeta } from '../constants'
@@ -17,6 +17,7 @@ import { api } from '../api'
 
 const PERCEPTION_URL =
   (import.meta.env.VITE_PERCEPTION_URL as string | undefined) ?? 'http://localhost:8008'
+const TESTING_SESSION_KEY = 'snowglobe.testing.session.v1'
 
 interface Verdict {
   event_type: EventType
@@ -53,18 +54,100 @@ interface DetectResult {
   events?: Record<string, unknown>[]
 }
 
+type TestingFileMeta = {
+  name: string
+  type: string
+  size: number
+  lastModified: number
+}
+
+type TestingSessionDraft = {
+  discover: boolean
+  selected: string[]
+  customType: string
+  zone: string
+  minConf: number
+  fileMeta?: TestingFileMeta | null
+}
+
+function normalizeSessionDraft(input: unknown): TestingSessionDraft {
+  if (!input || typeof input !== 'object') return defaultTestingSessionDraft()
+  const parsed = input as Partial<TestingSessionDraft>
+  const selected =
+    Array.isArray(parsed.selected) && parsed.selected.every((item) => typeof item === 'string')
+      ? (parsed.selected as string[])
+      : [...SUGGESTED_EVENT_TYPES]
+  const zone = typeof parsed.zone === 'string' && parsed.zone ? parsed.zone : 'zone_a'
+  const customType = typeof parsed.customType === 'string' ? parsed.customType : ''
+  const minConf =
+    typeof parsed.minConf === 'number' && Number.isFinite(parsed.minConf)
+      ? Math.max(0, Math.min(1, parsed.minConf))
+      : 0.5
+  const discover = parsed.discover !== false
+  const fileMeta =
+    parsed.fileMeta && typeof parsed.fileMeta === 'object'
+      ? {
+          name: typeof (parsed.fileMeta as TestingFileMeta).name === 'string' ? (parsed.fileMeta as TestingFileMeta).name : '',
+          type: typeof (parsed.fileMeta as TestingFileMeta).type === 'string' ? (parsed.fileMeta as TestingFileMeta).type : '',
+          size: typeof (parsed.fileMeta as TestingFileMeta).size === 'number' ? (parsed.fileMeta as TestingFileMeta).size : 0,
+          lastModified:
+            typeof (parsed.fileMeta as TestingFileMeta).lastModified === 'number'
+              ? (parsed.fileMeta as TestingFileMeta).lastModified
+              : Date.now(),
+        }
+      : null
+  if (!fileMeta?.name || !fileMeta.type) {
+    return { discover, selected, customType, zone, minConf, fileMeta: null }
+  }
+  return { discover, selected, customType, zone, minConf, fileMeta }
+}
+
+function defaultTestingSessionDraft(): TestingSessionDraft {
+  return {
+    discover: true,
+    selected: [...SUGGESTED_EVENT_TYPES],
+    customType: '',
+    zone: 'zone_a',
+    minConf: 0.5,
+    fileMeta: null,
+  }
+}
+
+function loadTestingSessionDraft(): TestingSessionDraft {
+  try {
+    const raw = localStorage.getItem(TESTING_SESSION_KEY)
+    if (!raw) return defaultTestingSessionDraft()
+    const parsed = JSON.parse(raw)
+    return normalizeSessionDraft(parsed)
+  } catch {
+    return defaultTestingSessionDraft()
+  }
+}
+
+function saveTestingSessionDraft(draft: TestingSessionDraft) {
+  try {
+    localStorage.setItem(TESTING_SESSION_KEY, JSON.stringify(draft))
+  } catch {
+    /* ignore */
+  }
+}
+
 export function Testing({ store }: { store: Store }) {
+  const initialDraft = useMemo(() => loadTestingSessionDraft(), [])
   const [preview, setPreview] = useState<string | null>(null)
   const [videoDuration, setVideoDuration] = useState<number | null>(null)
-  const [discover, setDiscover] = useState(true)
-  const [selected, setSelected] = useState<EventType[]>([...SUGGESTED_EVENT_TYPES])
-  const [customType, setCustomType] = useState('')
-  const [zone, setZone] = useState('zone_a')
-  const [minConf, setMinConf] = useState(0.5)
+  const [discover, setDiscover] = useState<boolean>(initialDraft.discover)
+  const [selected, setSelected] = useState<EventType[]>(initialDraft.selected)
+  const [customType, setCustomType] = useState(initialDraft.customType)
+  const [zone, setZone] = useState(initialDraft.zone)
+  const [minConf, setMinConf] = useState<number>(initialDraft.minConf)
+  const [fileMeta, setFileMeta] = useState<TestingFileMeta | null>(() => initialDraft.fileMeta ?? null)
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const file = store.testingFile
-  const isVideo = file?.type.startsWith('video/') ?? false
+  const isVideo = file
+    ? file.type.startsWith('video/')
+    : (fileMeta?.type?.startsWith('video/') ?? false)
   const busy = store.testingRun?.running ?? false
   const result = (store.testingResult as DetectResult | null) ?? null
   const error = store.testingError
@@ -81,6 +164,28 @@ export function Testing({ store }: { store: Store }) {
     return () => URL.revokeObjectURL(url)
   }, [file, isVideo])
 
+  useEffect(() => {
+    const effectivePreviewName = file?.name ?? fileMeta?.name
+    saveTestingSessionDraft({
+      discover,
+      selected,
+      customType,
+      zone,
+      minConf,
+      fileMeta: effectivePreviewName
+        ? {
+            name: effectivePreviewName,
+            type:
+              file?.type ??
+              fileMeta?.type ??
+              (isVideo ? 'video/mp4' : 'image/png'),
+            size: file?.size ?? fileMeta?.size ?? 0,
+            lastModified: file?.lastModified ?? fileMeta?.lastModified ?? Date.now(),
+          }
+        : null,
+    })
+  }, [discover, fileMeta, file, isVideo, minConf, selected, customType, zone])
+
   const pick = (f: File | null | undefined) => {
     if (!f) return
     const image = f.type.startsWith('image/')
@@ -88,6 +193,12 @@ export function Testing({ store }: { store: Store }) {
       store.setTestingError('Please choose an image or video file.')
       return
     }
+    setFileMeta({
+      name: f.name,
+      type: f.type,
+      size: f.size,
+      lastModified: f.lastModified,
+    })
     store.setTestingError(null)
     store.setTestingResult(null)
     store.setTestingFile(f)
@@ -161,8 +272,15 @@ export function Testing({ store }: { store: Store }) {
   async function run() {
     if (!canRun) return
     const mediaKind: 'image' | 'video' = isVideo ? 'video' : 'image'
+    const runId = store.startTestingRun({
+      kind: mediaKind,
+      fileName: file?.name || 'upload',
+      zone,
+    })
+    let latestPayload: Record<string, unknown> = { kind: mediaKind }
+    let events: AppEvent[] = []
+    const runIds: string[] = []
     let runError: string | null = null
-    store.startTestingRun({ kind: mediaKind, fileName: file?.name || 'upload' })
     store.setTestingError(null)
     store.setTestingResult(null)
 
@@ -185,7 +303,8 @@ export function Testing({ store }: { store: Store }) {
         throw new Error(`detect API returned ${res.status}: ${body.slice(0, 200)}`)
       }
       const payload = (await res.json()) as DetectResult
-      const events = parseResultEvents(payload.events ?? [])
+      latestPayload = { ...payload } as Record<string, unknown>
+      events = parseResultEvents(payload.events ?? [])
       store.setTestingResult(payload)
 
       if (events.length) {
@@ -194,7 +313,6 @@ export function Testing({ store }: { store: Store }) {
 
         // Send to automation so workflow runs are created and reflected in Runs.
         let postError: string | null = null
-        const runIds: string[] = []
         if (api.configured()) {
           const posts = events.map(async (event) =>
             api
@@ -228,7 +346,14 @@ export function Testing({ store }: { store: Store }) {
           `\n(${e instanceof Error ? e.message : String(e)})`
       store.setTestingError(runError)
     } finally {
-      store.finishTestingRun({ error: runError ?? undefined })
+      store.finishTestingRun({
+        id: runId,
+        error: runError ?? undefined,
+        payload: latestPayload,
+        detectedEvents: events,
+        runIds,
+        zone,
+      })
     }
   }
 
@@ -256,13 +381,23 @@ export function Testing({ store }: { store: Store }) {
           >
             {preview && isVideo ? (
               <video
-                src={preview}
-                controls
-                className="max-h-72 w-full object-contain"
-                onLoadedMetadata={(e) => setVideoDuration(e.currentTarget.duration)}
-              />
+                  src={preview}
+                  controls
+                  className="max-h-72 w-full object-contain"
+                  onLoadedMetadata={(e) => setVideoDuration(e.currentTarget.duration)}
+                />
             ) : preview ? (
               <img src={preview} alt="upload preview" className="max-h-72 w-full object-contain" />
+            ) : fileMeta ? (
+              <div className="flex flex-col items-center gap-2 p-8 text-center text-xs text-muted-foreground">
+                <Upload className="size-7" />
+                <div>
+                  <b className="text-sm text-foreground">{busy ? 'Running test on' : 'Uploaded'}</b>{' '}
+                  <span className="font-medium text-foreground">{fileMeta.name}</span>
+                </div>
+                <span>Type: {fileMeta.type || 'unknown'} · Size: {Math.round(fileMeta.size / 1024)} KB</span>
+                {busy && <span className="text-amber-500">Test is still running.</span>}
+              </div>
             ) : (
               <div className="flex flex-col items-center gap-2 p-8 text-center text-sm text-muted-foreground">
                   <Upload className="size-7" />
@@ -280,9 +415,14 @@ export function Testing({ store }: { store: Store }) {
               onChange={(e) => pick(e.target.files?.[0])}
             />
           </div>
-          {file && (
+          {(file || fileMeta) && (
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span className="truncate">{file.name}</span>
+              <span className="truncate">
+                {file?.name ?? fileMeta?.name}
+                <span className="ml-2 opacity-70">
+                  {busy && !file ? '(running from persisted session)' : ''}
+                </span>
+              </span>
               <Button variant="ghost" size="sm" onClick={() => inputRef.current?.click()}>
                 Replace
               </Button>
