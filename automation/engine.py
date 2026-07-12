@@ -44,12 +44,16 @@ def render(value, event: dict, steps: dict | None = None):
 
 def matches(workflow: dict, event: dict) -> bool:
     t = workflow["trigger"]
-    type_ok = t["event_type"] == "*" or t["event_type"] == event["event_type"]
+    # Schedule workflows are fired by the scheduler, never by incoming events.
+    if t.get("type") == "schedule":
+        return False
+    event_type = t.get("event_type", "*")
+    type_ok = event_type == "*" or event_type == event["event_type"]
     return (
         workflow.get("enabled", False)
         and type_ok
         and (not t.get("zone") or t["zone"] == event["location"])
-        and event["confidence"] >= t["min_confidence"]
+        and event["confidence"] >= t.get("min_confidence", 0)
     )
 
 

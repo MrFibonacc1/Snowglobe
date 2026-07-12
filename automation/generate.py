@@ -42,6 +42,17 @@ event_type is an open-ended snake_case slug describing the physical event, e.g.
 spill, person_count, foot_traffic, safety_violation, blocked_exit, low_stock,
 missing_ppe. Use "*" to match any event. Omit "zone" unless the user names one.
 
+SCHEDULE (cron) triggers: if the request is time-based ("every day at 9am",
+"each morning", "hourly", "check the last 24 hours"), use a schedule trigger
+instead:
+  "trigger": { "type": "schedule", "cron": "0 9 * * *", "lookback_hours": 24,
+               "event_type": "<optional filter, e.g. foot_traffic, or omit>" }
+cron is 5 fields (min hour dom mon dow); "0 9 * * *" = daily 09:00. On each run
+the engine aggregates the event log over lookback_hours and gives steps a
+summary event with: {{event.payload.total_events}}, {{event.payload.total_count}}
+(e.g. total people), {{event.payload.busiest_zone}}, {{event.payload.window_hours}}.
+For "all human traffic" set event_type to "foot_traffic" (or "person_count").
+
 Step types and their config:
 - h_agent  -> a computer-use agent that drives a web browser. config:
     { "agent": "h/web-surfer-flash" | "h/web-surfer-pro" | "h/deep-search-pro",
@@ -67,6 +78,12 @@ Example — "when there's a spill, log the time and location to my google doc":
  "steps":[{"id":"s1","type":"h_agent","config":{"agent":"h/web-surfer-pro","task":"custom_url",
    "url":"<google doc url>","share":true,
    "instructions":"Open the doc and append a line: Spill at {{event.timestamp}} in {{event.location}}."}}]}
+
+Example — "every day at 9am, check the last 24h of foot traffic and email me a summary":
+{"name":"Daily 9am foot-traffic digest","enabled":true,
+ "trigger":{"type":"schedule","cron":"0 9 * * *","lookback_hours":24,"event_type":"foot_traffic"},
+ "steps":[{"id":"s1","type":"h_agent","config":{"agent":"h/web-surfer-pro","task":"custom_url",
+   "instructions":"Compose a summary: {{event.payload.total_count}} people across {{event.payload.window_hours}}h, busiest zone {{event.payload.busiest_zone}}. Email it to the manager."}}]}
 
 Return ONLY the JSON object."""
 
@@ -123,17 +140,34 @@ def _extract_json(text: str) -> dict:
     raise ValueError("unbalanced JSON in LLM output")
 
 
+_CRON_RE = re.compile(r"^\s*\S+\s+\S+\s+\S+\s+\S+\s+\S+\s*$")
+
+
 def _normalize(wf: dict, description: str) -> dict:
     """Coerce an LLM object into a schema-valid workflow."""
     trig = wf.get("trigger") or {}
-    event_type = _slug(trig.get("event_type") or _guess_event(description))
-    norm_trigger = {
-        "event_type": event_type,
-        "min_confidence": _num(trig.get("min_confidence"), 0.6),
-        "cooldown_sec": int(_num(trig.get("cooldown_sec"), 60)),
-    }
-    if trig.get("zone"):
-        norm_trigger["zone"] = str(trig["zone"])
+    schedule = trig.get("type") == "schedule" or bool(trig.get("cron")) or _looks_scheduled(description)
+
+    if schedule:
+        cron = trig.get("cron") if isinstance(trig.get("cron"), str) and _CRON_RE.match(trig["cron"]) else _guess_cron(description)
+        norm_trigger: dict = {
+            "type": "schedule",
+            "cron": cron,
+            "lookback_hours": _num(trig.get("lookback_hours"), 24),
+        }
+        et = trig.get("event_type")
+        if et:
+            norm_trigger["event_type"] = _slug(et)
+        if trig.get("zone"):
+            norm_trigger["zone"] = str(trig["zone"])
+    else:
+        norm_trigger = {
+            "event_type": _slug(trig.get("event_type") or _guess_event(description)),
+            "min_confidence": _num(trig.get("min_confidence"), 0.6),
+            "cooldown_sec": int(_num(trig.get("cooldown_sec"), 60)),
+        }
+        if trig.get("zone"):
+            norm_trigger["zone"] = str(trig["zone"])
 
     steps = []
     for i, s in enumerate(wf.get("steps") or [], start=1):
@@ -172,6 +206,35 @@ def _guess_event(text: str) -> str:
         if re.search(pat, low):
             return ev
     return "*"
+
+
+_SCHEDULE_RE = re.compile(
+    r"every day|each day|daily|each morning|every morning|each night|nightly|"
+    r"hourly|every hour|every \d+ ?(min|minute|hour)|weekly|每|at \d{1,2}\s*(am|pm|:)|schedule|cron",
+    re.IGNORECASE,
+)
+
+
+def _looks_scheduled(text: str) -> bool:
+    return bool(_SCHEDULE_RE.search(text or ""))
+
+
+def _guess_cron(text: str) -> str:
+    low = (text or "").lower()
+    m = re.search(r"every\s+(\d+)\s*(min|minute)", low)
+    if m:
+        return f"*/{max(5, int(m.group(1)))} * * * *"
+    if re.search(r"hourly|every hour", low):
+        return "0 * * * *"
+    # "at 9am", "9 am", "at 9", "9:30am"
+    m = re.search(r"(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", low)
+    if m and ("am" in low or "pm" in low or "at " in low):
+        hour = int(m.group(1)) % 12
+        if m.group(3) == "pm":
+            hour += 12
+        minute = int(m.group(2) or 0)
+        return f"{minute} {hour} * * *"
+    return "0 9 * * *"  # sensible default: daily 09:00
 
 
 def _heuristic(description: str) -> dict:

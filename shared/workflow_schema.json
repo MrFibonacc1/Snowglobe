@@ -22,15 +22,16 @@
     },
     "trigger": {
       "type": "object",
-      "required": [
-        "event_type",
-        "min_confidence",
-        "cooldown_sec"
-      ],
+      "description": "Either an event trigger (type omitted or 'event') or a schedule trigger (type 'schedule' with a cron cadence + lookback window over the event log).",
       "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["event", "schedule"],
+          "description": "'event' (default): fire on a matching detection. 'schedule': fire on a cron cadence over aggregated logs."
+        },
         "event_type": {
           "type": "string",
-          "description": "Semantic event type slug to match (snake_case), or '*' to match any event type. Open-ended; not a fixed enum.",
+          "description": "Event triggers: the semantic slug to match ('*' = any). Schedule triggers: optional filter for the log aggregation.",
           "minLength": 1,
           "pattern": "^(\\*|[a-z0-9]+(?:_[a-z0-9]+)*)$"
         },
@@ -47,6 +48,15 @@
           "type": "integer",
           "minimum": 0,
           "description": "Dedup window: max one run per (workflow, zone) per window"
+        },
+        "cron": {
+          "type": "string",
+          "description": "Schedule triggers: 5-field cron (min hour dom mon dow), e.g. '0 9 * * *' = daily at 09:00 (server time)."
+        },
+        "lookback_hours": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Schedule triggers: how many hours of the event log to aggregate on each run (default 24)."
         }
       }
     },

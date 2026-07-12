@@ -34,6 +34,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import engine
 import composio_status
 import generate
+import scheduler
 import seeds
 import storage
 from shared.event_normalization import normalize_event
@@ -71,6 +72,8 @@ async def startup() -> None:
         stock = next((wf for wf in seeds.WORKFLOWS if wf["id"] == "wf_stock_update"), None)
         if stock:
             storage.upsert_workflow(stock)
+    # Fire cron/schedule workflows on their cadence.
+    asyncio.create_task(scheduler.loop())
 
 
 def _validate(body: dict, schema: dict) -> None:
@@ -169,10 +172,14 @@ async def test_workflow(wf_id: str):
     wf = storage.get_workflow(wf_id)
     if not wf:
         raise HTTPException(404)
+    # Schedule workflows: fire a real aggregate run now (over the lookback window).
+    if scheduler.is_schedule(wf):
+        run_id = await scheduler.run_scheduled(wf)
+        return {"accepted": True, "run_id": run_id}
     t = wf["trigger"]
     event = {
         "event_id": f"evt_test_{uuid.uuid4().hex[:8]}",
-        "event_type": t["event_type"],
+        "event_type": t.get("event_type", "*"),
         "timestamp": __import__("datetime").datetime.now(
             __import__("datetime").timezone.utc
         ).isoformat(),
