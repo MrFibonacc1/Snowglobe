@@ -47,6 +47,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Field, PillToggle } from './Cameras'
+import { api } from '../api'
+import type { AppEvent } from '../types'
 import { cn } from '@/lib/utils'
 import {
   Plus,
@@ -61,6 +63,7 @@ import {
   Split,
   Volume2,
   Wrench,
+  Zap,
 } from 'lucide-react'
 
 type StepIcon = ComponentType<{ className?: string; size?: number | string }>
@@ -124,6 +127,7 @@ function blankWorkflow(): Workflow {
 
 export function WorkflowBuilder({ store }: { store: Store }) {
   const [editing, setEditing] = useState<{ wf: Workflow; isNew: boolean } | null>(null)
+  const [sendingEvent, setSendingEvent] = useState(false)
 
   const runTest = async (id: string, name: string) => {
     const runId = await store.testWorkflow(id)
@@ -151,6 +155,15 @@ export function WorkflowBuilder({ store }: { store: Store }) {
           <h2 className="text-lg font-semibold">Workflows</h2>
           <span className="text-sm text-muted-foreground">detection → ordered action steps</span>
         </div>
+        <Button
+          variant="secondary"
+          className="gap-1.5"
+          onClick={() => setSendingEvent(true)}
+          disabled={!store.backendOnline}
+          title={store.backendOnline ? 'Emit a test event' : 'Backend offline'}
+        >
+          <Zap className="size-4" /> Send test event
+        </Button>
         <Button
           className="gap-1.5"
           onClick={() => setEditing({ wf: blankWorkflow(), isNew: true })}
@@ -255,7 +268,120 @@ export function WorkflowBuilder({ store }: { store: Store }) {
           }}
         />
       )}
+
+      {sendingEvent && <SendTestEventDialog onClose={() => setSendingEvent(false)} />}
     </div>
+  )
+}
+
+function SendTestEventDialog({ onClose }: { onClose: () => void }) {
+  const [eventType, setEventType] = useState('spill')
+  const [zone, setZone] = useState('zone_a')
+  const [confidence, setConfidence] = useState(0.9)
+  const [count, setCount] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const valid = eventType.trim().length > 0 && zone.trim().length > 0
+
+  const send = async () => {
+    setBusy(true)
+    const n = Number(count)
+    const payload: Record<string, unknown> = count.trim() && !Number.isNaN(n)
+      ? { count: n }
+      : { detail: `${eventMeta(eventType).label} detected (test)` }
+    const event: AppEvent = {
+      event_id: `evt_${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`,
+      event_type: eventType.trim(),
+      timestamp: new Date().toISOString(),
+      confidence,
+      location: zone.trim(),
+      payload,
+    }
+    try {
+      const res = await api.postEvent(event)
+      const started = res.runs_started?.length ?? 0
+      if (started > 0) {
+        toast.success(`Event sent — triggered ${started} workflow${started === 1 ? '' : 's'}`, {
+          description: 'Watch them run on the Runs page.',
+        })
+      } else {
+        toast.info('Event sent — no workflows matched', {
+          description: 'Check the trigger type / zone / confidence.',
+        })
+      }
+      onClose()
+    } catch {
+      toast.error('Could not send — backend offline')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Send test event</DialogTitle>
+          <DialogDescription>
+            Emit an event as if a camera detected it — every matching workflow fires
+            (respecting zone, confidence, and cooldown).
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-4 py-2">
+          <div className="flex flex-col gap-2">
+            <Label>Event type</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {[...new Set([...SUGGESTED_EVENT_TYPES, eventType])].filter(Boolean).map((t) => (
+                <PillToggle key={t} selected={eventType === t} onClick={() => setEventType(t)}>
+                  <EventIcon type={t} className="size-3.5" /> {eventMeta(t).label}
+                </PillToggle>
+              ))}
+            </div>
+            <Input
+              value={eventType}
+              onChange={(e) =>
+                setEventType(
+                  e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''),
+                )
+              }
+              placeholder="or a custom type, e.g. foot_traffic"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Zone">
+              <Input value={zone} onChange={(e) => setZone(e.target.value)} placeholder="zone_a" />
+            </Field>
+            <Field label="Count (optional)" hint="for count-type events">
+              <Input
+                type="number"
+                value={count}
+                onChange={(e) => setCount(e.target.value)}
+                placeholder="e.g. 25"
+              />
+            </Field>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label>Confidence, {Math.round(confidence * 100)}%</Label>
+            <Slider
+              min={0}
+              max={1}
+              step={0.05}
+              value={[confidence]}
+              onValueChange={([v]) => setConfidence(v)}
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button disabled={!valid || busy} onClick={send} className="gap-1.5">
+            <Zap className="size-4" /> {busy ? 'Sending…' : 'Send event'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
