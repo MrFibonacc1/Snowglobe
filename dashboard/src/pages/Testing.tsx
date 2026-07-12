@@ -25,7 +25,13 @@ const TESTING_SESSION_KEY = 'snowglobe.testing.session.v1'
 // model API stalls (it does; this happens in practice), waiting that long
 // would freeze the whole live loop on one bad frame. Abort well before that
 // and let the next tick grab a fresh screenshot instead of waiting it out.
-const DETECT_TIMEOUT_MS = 20000
+const DETECT_TIMEOUT_MS = 20000 // live single-frame tick: skip a slow frame, move on
+// One-shot uploads wait longer than a live tick. The backend allows up to 60s
+// per VLM call and a video runs several frames sequentially, so a flat 20s
+// aborted valid multi-frame runs mid-flight (a 5-frame clip on the 90B vision
+// model lands right around 20s).
+const IMAGE_DETECT_TIMEOUT_MS = 60000
+const PER_FRAME_TIMEOUT_MS = 30000
 // Live mode renders like a video result (summary + frame timeline) instead of
 // replacing a single-frame verdict every tick — that swap-to-blank-then-fill
 // on every cycle read as "it keeps reloading and never lands." The timeline
@@ -640,6 +646,9 @@ export function Testing({ store }: { store: Store }) {
     let events: AppEvent[] = []
     const runIds: string[] = []
     let runError: string | null = null
+    // Size the abort budget to the work: a video runs several frames, so a flat
+    // 20s killed valid multi-frame runs. Set below once we know the frame count.
+    let uploadTimeoutMs = IMAGE_DETECT_TIMEOUT_MS
     store.setTestingError(null)
     store.setTestingResult(null)
     setAgentRunIds([])
@@ -656,11 +665,12 @@ export function Testing({ store }: { store: Store }) {
         const { fps, maxFrames } = estimateVideoSampling(activeIsVideo)
         fd.append('fps', String(fps))
         fd.append('max_frames', String(maxFrames))
+        uploadTimeoutMs = maxFrames * PER_FRAME_TIMEOUT_MS
       }
       const res = await fetch(`${PERCEPTION_URL}${endpoint}`, {
         method: 'POST',
         body: fd,
-        signal: AbortSignal.timeout(DETECT_TIMEOUT_MS),
+        signal: AbortSignal.timeout(uploadTimeoutMs),
       })
       if (!res.ok) {
         const body = await res.text()
@@ -714,8 +724,8 @@ export function Testing({ store }: { store: Store }) {
     } catch (e) {
       runError =
         e instanceof Error && e.name === 'TimeoutError'
-          ? `Vision model call timed out after ${DETECT_TIMEOUT_MS / 1000}s — the upstream model API is slow ` +
-            `right now. Moving on to the next frame.`
+          ? `Vision model call timed out after ${uploadTimeoutMs / 1000}s — the vision model is slow right ` +
+            `now. Try again, sample fewer frames, or point VLM_MODEL at a smaller model.`
           : `Could not reach the perception detect API at ${PERCEPTION_URL}. ` +
             `Start it (from the repo root) with:  python -m perception.server` +
             `\n(${e instanceof Error ? e.message : String(e)})`
