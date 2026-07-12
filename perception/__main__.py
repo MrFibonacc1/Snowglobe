@@ -16,7 +16,8 @@ def parse_args(argv=None):
         description="Video → NVIDIA VLM detections → schema-valid events.",
     )
     p.add_argument("--source", default="webcam",
-                   help="'webcam', a camera index, an rtsp:// URL, or a video file path")
+                   help="'webcam', a camera index, an rtsp:// URL, a video file path, "
+                        "or 'screen' / 'screen:X,Y,W,H' to capture a screen region")
     p.add_argument("--zone", default="zone_a", help="zone identifier stamped on events")
     p.add_argument("--events", default="",
                    help="comma-separated event types to watch for (targeted mode). "

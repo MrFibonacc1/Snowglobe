@@ -17,6 +17,7 @@ python-multipart==0.0.32          # FastAPI file uploads (UploadFile)
 opencv-python-headless==5.0.0.93  # headless: no GUI libs, smaller server image
 numpy==2.5.1
 pillow==12.3.0
+mss==10.2.0                       # screen-region capture (--source screen[:X,Y,W,H])
 ultralytics==8.4.92               # YOLO object detector (bounding boxes)
 torch==2.13.0
 torchvision==0.28.0
