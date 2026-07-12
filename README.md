@@ -2,7 +2,7 @@
 
 Every shop, warehouse, and lobby already runs cameras. They record everything
 and act on nothing. Someone still has to watch a wall of monitors, or scrub the
-footage after the incident already happened, and then do the real work by hand:
+footage after the incident already happened, and then do the work by hand:
 file the facilities ticket, update the inventory sheet, reorder the stock,
 message the manager. Usually no one is watching, so the spill sits, the shelf
 stays empty, and the hazard goes unlogged until it turns into a problem.
@@ -59,7 +59,7 @@ dashboard shows every detection and every agent run, step by step.
   describe the automation in plain English and let the NVIDIA Nemotron builder
   draft it for you.
 - **Fail-closed actions:** agent runs and Composio calls report failure instead
-  of silently claiming success, so a run marked done really did finish.
+  of silently claiming success, so the run log reflects what actually happened.
 - **Durable runtime:** cooldown claims and inventory counts live in SQLite and
   survive restarts, so a camera cannot fire the same incident twice.
 - **Scheduled workflows:** cron triggers and 24-hour event digests, not just
