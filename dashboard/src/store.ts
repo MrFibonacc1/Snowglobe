@@ -202,6 +202,8 @@ export interface NewCamera {
   url?: string
   fps: number
   detects: EventType[]
+  // Route through the go2rtc gateway (perception backend). Omitted → unchanged.
+  use_gateway?: boolean
 }
 
 // The perception service samples rtsp/hls by URL. For local webcam we allow
@@ -229,6 +231,7 @@ function backendToCamera(st: CameraState, source: CameraSource, url?: string): C
     frames_sampled: st.frames_sampled,
     events_emitted: st.events_emitted,
     error: st.error ?? null,
+    origin: st.origin ?? null,
   }
 }
 
@@ -707,6 +710,7 @@ export function useStore() {
         source: sourceString(input),
         fps: input.fps,
         events: input.detects,
+        ...(input.use_gateway !== undefined ? { use_gateway: input.use_gateway } : {}),
       }
       try {
         const st = await createCamera(payload)

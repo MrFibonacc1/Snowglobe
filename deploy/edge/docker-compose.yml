@@ -1,0 +1,24 @@
+# Snowglobe edge agent — camera gateway.
+#
+# go2rtc runs inside the shop LAN and normalizes every camera (Hikvision,
+# Dahua, Amcrest, Reolink, ONVIF, Wyze, Nest, ...) to rtsp://<host>:8554/<name>.
+# The perception sampler (run separately: `python -m perception.server`,
+# pointed at GO2RTC_URL below) consumes those normalized streams; only event
+# JSON leaves the building.
+#
+#   cd deploy/edge && docker compose up -d
+#   # then, on the same box:
+#   GO2RTC_URL=http://localhost:1984 GO2RTC_RTSP=rtsp://localhost:8554 \
+#   AUTOMATION_URL=https://<cloud>/  python -m perception.server
+#
+# host networking is required so go2rtc can do ONVIF WS-Discovery and reach
+# cameras on the local subnet.
+
+services:
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    container_name: snowglobe-go2rtc
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml

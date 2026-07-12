@@ -77,6 +77,14 @@ class CameraState:
     fps: float = 0.3
     events: list[str] = field(default_factory=list)
     mock: bool = False
+    # Original request source when `source` is a normalized gateway (go2rtc) URL;
+    # None for directly-sampled cameras. Surfaced for display only — the worker
+    # always samples `source`.
+    origin: str | None = None
+    # go2rtc stream key this camera was routed through, or None if sampled
+    # directly. Stored with the camera's existence so delete/shutdown can
+    # unregister the exact stream without a fragile side-map.
+    gateway_stream: str | None = None
     status: str = "connecting"
     last_frame_at: datetime | None = None
     frames_sampled: int = 0
@@ -101,6 +109,8 @@ class CameraState:
                 "id": self.id,
                 "name": self.name,
                 "source": self.source,
+                "origin": self.origin,
+                "gateway_stream": self.gateway_stream,
                 "zone": self.zone,
                 "fps": self.fps,
                 "events": list(self.events),
@@ -395,11 +405,14 @@ class CameraRegistry:
         events: list[str] | None = None,
         mock: bool = False,
         automation_url: str | None = None,
+        origin: str | None = None,
+        gateway_stream: str | None = None,
     ) -> dict:
         cam_id = "cam_" + uuid.uuid4().hex[:8]
         state = CameraState(
             id=cam_id, name=name, source=source, zone=zone,
-            fps=fps, events=list(events or []), mock=mock,
+            fps=fps, events=list(events or []), mock=mock, origin=origin,
+            gateway_stream=gateway_stream,
         )
         worker = CameraWorker(state, self._cfg, automation_url or self._automation_url)
         with self._lock:
