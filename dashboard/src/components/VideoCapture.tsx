@@ -8,6 +8,7 @@ import { EventIcon } from './ui-kit'
 import { Upload, Loader2, Video, Camera as CameraIcon, Play, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api, cameraSnapshotUrl } from '../api'
+import { LiveCameraStream } from './LiveCameraStream'
 
 const PERCEPTION_URL =
   (import.meta.env.VITE_PERCEPTION_URL as string | undefined) ?? 'http://localhost:8008'
@@ -45,13 +46,27 @@ export function VideoCapture({
   const [lastEvents, setLastEvents] = useState<AppEvent[]>([])
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const [liveStreaming, setLiveStreaming] = useState(false)
+  const latestMjpegFrameRef = useRef<Blob | null>(null)
+  const analyzedMjpegFrameRef = useRef<Blob | null>(null)
 
   // Browser-camera source (getUserMedia — real permission prompt).
   const [browserStream, setBrowserStream] = useState<MediaStream | null>(null)
   const [browserError, setBrowserError] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const mountedRef = useRef(true)
-  useEffect(() => () => { mountedRef.current = false }, [])
+  const browserStreamRef = useRef<MediaStream | null>(null)
+  useEffect(() => {
+    // React Strict Mode runs setup -> cleanup -> setup in development. Reset the
+    // flag during every setup so an async permission response is not mistaken
+    // for a response after unmount.
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      browserStreamRef.current?.getTracks().forEach((track) => track.stop())
+      browserStreamRef.current = null
+    }
+  }, [])
 
   // Live perception cameras available for a snapshot grab.
   const liveCameras = useMemo<Camera[]>(
@@ -61,12 +76,19 @@ export function VideoCapture({
   const [cameraId, setCameraId] = useState('')
   useEffect(() => {
     if (!cameraId && liveCameras.length) setCameraId(liveCameras[0].id)
+    if (cameraId && !liveCameras.some((camera) => camera.id === cameraId)) {
+      setCameraId(liveCameras[0]?.id ?? '')
+      setLiveStreaming(false)
+    }
   }, [cameraId, liveCameras])
+
+  const receiveMjpegFrame = useCallback((blob: Blob) => {
+    latestMjpegFrameRef.current = blob
+  }, [])
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.srcObject = browserStream
   }, [browserStream])
-  useEffect(() => () => browserStream?.getTracks().forEach((t) => t.stop()), [browserStream])
 
   useEffect(() => {
     if (!file) {
@@ -105,7 +127,9 @@ export function VideoCapture({
         stream.getTracks().forEach((t) => t.stop())
         return
       }
+      setLiveStreaming(false)
       setFile(null)
+      browserStreamRef.current = stream
       setBrowserStream(stream)
     } catch (e) {
       setBrowserError(`Could not access your camera: ${e instanceof Error ? e.message : String(e)}`)
@@ -115,6 +139,7 @@ export function VideoCapture({
   const stopBrowserCamera = useCallback(() => {
     setBrowserStream((prev) => {
       prev?.getTracks().forEach((t) => t.stop())
+      if (browserStreamRef.current === prev) browserStreamRef.current = null
       return null
     })
   }, [])
@@ -134,11 +159,11 @@ export function VideoCapture({
   }, [])
 
   const detect = useCallback(
-    async (target: File) => {
+    async (target: File, live = false) => {
       const targetIsVideo = target.type.startsWith('video/')
       setBusy(true)
       setError(null)
-      onRunsStarted([])
+      if (!live) onRunsStarted([])
       const runIds: string[] = []
       try {
         const fd = new FormData()
@@ -199,6 +224,59 @@ export function VideoCapture({
     [videoDuration, store, onRunsStarted],
   )
 
+  const detectRef = useRef(detect)
+  useEffect(() => {
+    detectRef.current = detect
+  }, [detect])
+
+  // Opening the browser webcam is itself the start action: keep the <video>
+  // live and analyze freshly rendered frames continuously until Stop camera.
+  useEffect(() => {
+    if (!browserStream) return
+    let cancelled = false
+    ;(async () => {
+      while (!cancelled) {
+        const frame = await captureBrowserFrame()
+        if (cancelled) break
+        if (frame) {
+          await detectRef.current(frame, true)
+        }
+        // Match the MJPEG sampler cadence and avoid a tight loop if a mocked or
+        // unusually fast detector resolves immediately.
+        await new Promise((resolve) => setTimeout(resolve, frame ? 500 : 100))
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [browserStream, captureBrowserFrame])
+
+  useEffect(() => {
+    if (!liveStreaming || !cameraId) return
+    let cancelled = false
+    latestMjpegFrameRef.current = null
+    analyzedMjpegFrameRef.current = null
+    ;(async () => {
+      while (!cancelled) {
+        const blob = latestMjpegFrameRef.current
+        if (!blob || blob === analyzedMjpegFrameRef.current) {
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          continue
+        }
+        analyzedMjpegFrameRef.current = blob
+        await detectRef.current(
+          new File([blob], `camera-${cameraId}-mjpeg-frame.jpg`, {
+            type: blob.type || 'image/jpeg',
+          }),
+          true,
+        )
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [cameraId, liveStreaming])
+
   const grabAndDetect = useCallback(async () => {
     // Prefer browser camera if active, then a live perception camera.
     if (browserStream) {
@@ -226,14 +304,14 @@ export function VideoCapture({
       {/* Preview / drop zone */}
       <div
         role="button"
-        tabIndex={preview || browserStream ? -1 : 0}
+        tabIndex={preview || browserStream || liveStreaming ? -1 : 0}
         className={cn(
           'relative flex min-h-48 cursor-pointer items-center justify-center overflow-hidden rounded-lg border-2 border-dashed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           dragging ? 'border-primary bg-primary/5' : 'hover:border-muted-foreground/40',
         )}
-        onClick={() => !preview && !browserStream && inputRef.current?.click()}
+        onClick={() => !preview && !browserStream && !liveStreaming && inputRef.current?.click()}
         onKeyDown={(e) => {
-          if (!preview && !browserStream && (e.key === 'Enter' || e.key === ' ')) {
+          if (!preview && !browserStream && !liveStreaming && (e.key === 'Enter' || e.key === ' ')) {
             e.preventDefault()
             inputRef.current?.click()
           }
@@ -249,8 +327,17 @@ export function VideoCapture({
           pick(e.dataTransfer.files?.[0])
         }}
       >
-        {browserStream ? (
-          <video ref={videoRef} autoPlay muted playsInline className="max-h-64 w-full object-contain" />
+        {liveStreaming && cameraId ? (
+          <LiveCameraStream cameraId={cameraId} onFrame={receiveMjpegFrame} />
+        ) : browserStream ? (
+          <video
+            ref={videoRef}
+            autoPlay
+            muted
+            playsInline
+            data-testid="browser-camera-preview"
+            className="max-h-64 w-full object-contain"
+          />
         ) : preview && isVideo ? (
           <video
             src={preview}
@@ -316,17 +403,31 @@ export function VideoCapture({
             <Button variant="secondary" size="sm" disabled={!canGrab} onClick={grabAndDetect}>
               <CameraIcon className="size-4" /> Grab frame
             </Button>
+            <Button
+              variant={liveStreaming ? 'olive' : 'secondary'}
+              size="sm"
+              onClick={() => {
+                stopBrowserCamera()
+                setFile(null)
+                setError(null)
+                setSummary(null)
+                setLastEvents([])
+                setLiveStreaming((active) => !active)
+              }}
+            >
+              <Video className="size-4" /> {liveStreaming ? 'Stop live' : 'Start live'}
+            </Button>
           </div>
         )}
 
         <Button
           variant="secondary"
           size="sm"
-          onClick={browserStream ? () => (canGrab ? grabAndDetect() : undefined) : startBrowserCamera}
-          disabled={busy}
+          onClick={startBrowserCamera}
+          disabled={busy || !!browserStream}
         >
-          <CameraIcon className="size-4" />
-          {browserStream ? 'Analyze camera frame' : 'Use my camera'}
+          {browserStream ? <Loader2 className="size-4 animate-spin" /> : <CameraIcon className="size-4" />}
+          {browserStream ? 'Analyzing webcam live' : 'Use my camera'}
         </Button>
         {browserStream && (
           <Button variant="ghost" size="sm" onClick={stopBrowserCamera}>
