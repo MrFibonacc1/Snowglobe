@@ -22,16 +22,24 @@ from . import prompts
 class Verdict:
     event_type: str
     detected: bool
+    # The final, fused confidence used to gate workflows. Starts as the VLM's
+    # self-reported number and is adjusted by grounding (see fusion.fuse).
     confidence: float
     count: int | None = None
     detail: str | None = None
     severity: str | None = None
-    # Grounding (Grounding DINO) corroboration, filled in by fusion.py:
+    # Grounding (object detector) corroboration, filled in by fusion.py:
     #   grounded=True  → the object detector confirmed the finding
     #   grounded=False → we looked for supporting objects and found none
     #   grounded=None  → grounding was not run for this verdict
     grounded: bool | None = None
     objects: list | None = None  # [{phrase, confidence, boxes}]
+    # The two honest, separable signals behind `confidence`. `vlm_confidence` is
+    # the model's raw self-report (uncalibrated on its own); `grounding_confidence`
+    # is the object detector's best supporting-box score. fusion.fuse fills these
+    # so downstream can show "VLM 0.90 · confirmed" instead of one blended float.
+    vlm_confidence: float | None = None
+    grounding_confidence: float | None = None
     raw: str = ""
 
     def payload(self) -> dict:
@@ -44,6 +52,10 @@ class Verdict:
             p["severity"] = self.severity
         if self.grounded is not None:
             p["grounded"] = self.grounded
+        if self.vlm_confidence is not None:
+            p["vlm_confidence"] = round(self.vlm_confidence, 3)
+        if self.grounding_confidence is not None:
+            p["grounding_confidence"] = round(self.grounding_confidence, 3)
         if self.objects:
             p["objects"] = self.objects
         return p

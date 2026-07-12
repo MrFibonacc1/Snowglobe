@@ -88,3 +88,60 @@ export function ConfidenceBar({
     </div>
   )
 }
+
+type GroundedObject = { phrase?: string; confidence?: number }
+
+/**
+ * Honest confidence breakdown. The top-level `confidence` on an event is a
+ * *fused* number (the VLM's self-report, adjusted by an independent object
+ * detector). A bare percentage hides which signal it came from, so here we
+ * separate them: what the vision-language model claimed, and whether a second
+ * model (YOLO) actually saw the objects that would corroborate it.
+ *
+ * Reads perception's payload fields: `vlm_confidence`, `grounded`,
+ * `grounding_confidence`, `objects`. Degrades gracefully — if grounding never
+ * ran (older events, mock mode), it just shows the model's confidence.
+ */
+export function GroundingBadge({
+  payload,
+  className,
+}: {
+  payload?: Record<string, unknown> | null
+  className?: string
+}) {
+  const p = payload ?? {}
+  const grounded = p.grounded as boolean | undefined
+  const vlmConf = typeof p.vlm_confidence === 'number' ? (p.vlm_confidence as number) : undefined
+  const objects = Array.isArray(p.objects) ? (p.objects as GroundedObject[]) : []
+
+  // No grounding signal at all → nothing extra to say beyond the % shown elsewhere.
+  if (grounded === undefined && vlmConf === undefined) return null
+
+  const vlmPct = vlmConf !== undefined ? `${Math.round(vlmConf * 100)}%` : null
+  const objNames = objects
+    .map((o) => o.phrase)
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(', ')
+
+  let toneClass: string
+  let label: string
+  if (grounded === true) {
+    toneClass = 'bg-emerald-500/10 border-emerald-500/40 text-emerald-600'
+    label = objNames ? `confirmed · ${objNames}` : 'confirmed'
+  } else if (grounded === false) {
+    toneClass = 'bg-amber-500/10 border-amber-500/40 text-amber-600'
+    label = 'unconfirmed by detector'
+  } else {
+    toneClass = 'bg-muted border-muted text-muted-foreground'
+    label = 'not grounded'
+  }
+
+  return (
+    <Badge variant="outline" className={cn('gap-1 font-normal', toneClass, className)}>
+      {vlmPct && <span className="opacity-80">VLM {vlmPct}</span>}
+      {vlmPct && <span className="opacity-40">·</span>}
+      <span>{label}</span>
+    </Badge>
+  )
+}

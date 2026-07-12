@@ -171,6 +171,41 @@ export const seedWorkflows: Workflow[] = [
       },
     ],
   },
+  {
+    id: 'wf_stock_update',
+    name: 'Item taken off shelf → restock + alert',
+    enabled: true,
+    trigger: { event_type: 'item_removed_from_shelf', min_confidence: 0.5, cooldown_sec: 30 },
+    steps: [
+      {
+        id: 's1',
+        type: 'h_agent',
+        config: {
+          agent: 'h/web-surfer-flash',
+          task: 'custom_url',
+          url: 'https://httpbin.org/forms/post',
+          timeout_sec: 150,
+          instructions:
+            "You are logging a store restock request. On this form, set Customer " +
+            "name to 'Snowglobe Restock Bot', and in the 'Comments' box type " +
+            "exactly: 'RESTOCK NEEDED — {{event.payload.detail}} in " +
+            "{{event.location}} (confidence {{event.confidence}})'. Then click " +
+            "Submit order. Report back the JSON the server echoes, confirming the " +
+            "comments field contains the restock message. Work quickly; do not " +
+            "fill optional fields.",
+        },
+      },
+      {
+        id: 's2',
+        type: 'composio',
+        config: {
+          action: 'slack_message',
+          channel: '#store-ops',
+          text: 'Restock alert: {{event.payload.detail}} in {{event.location}} (confidence {{event.confidence}}). Agent filed the restock request. Agent report: {{steps.s1.answer}}',
+        },
+      },
+    ],
+  },
 ]
 
 export const seedEvents: AppEvent[] = []

@@ -88,19 +88,31 @@ def phrases_for(verdict: Verdict, max_phrases: int = 5) -> list[str]:
 
 
 def fuse(verdict: Verdict, phrases: list[str], detections: list[Detection]) -> Verdict:
-    """Adjust a verdict using DINO detections and attach the grounded objects.
+    """Adjust a verdict using object detections and attach the grounded objects.
 
-    * Confirmed (DINO localized ≥1 expected object): nudge confidence up toward
-      the joint confidence of both models and record what was seen.
-    * Denied (we had phrases to look for but DINO found none): cut confidence,
-      since the detector saw no physical evidence for the VLM's claim.
+    Records the two honest, separable signals on the verdict:
+    * `vlm_confidence` — the model's raw self-report (captured before blending).
+    * `grounding_confidence` — the detector's best supporting-box score
+      (0.0 when we looked and found nothing).
+
+    Then rewrites `confidence` (the gate value):
+    * Confirmed (detector localized ≥1 expected object): nudge confidence up
+      toward the joint confidence of both models and record what was seen.
+    * Denied (we had phrases to look for but the detector found none): cut
+      confidence, since there's no physical evidence for the VLM's claim.
     * No phrases / grounding disabled: leave the verdict untouched.
     """
     if not phrases:
         return verdict
 
+    # Capture the VLM's own confidence before we blend in the detector — this is
+    # what makes the final number honest downstream (VLM said X, grounding did Y).
+    if verdict.vlm_confidence is None:
+        verdict.vlm_confidence = verdict.confidence
+
     if detections:
         best = max(d.confidence for d in detections)
+        verdict.grounding_confidence = best
         # Confirmation should raise confidence but not to a blind 1.0; blend the
         # VLM's confidence with the detector's, biased toward the higher one.
         verdict.confidence = round(
@@ -115,6 +127,7 @@ def fuse(verdict: Verdict, phrases: list[str], detections: list[Detection]) -> V
         verdict.objects = objects
     else:
         # We looked and found nothing — treat as weak contradiction.
+        verdict.grounding_confidence = 0.0
         verdict.confidence = round(verdict.confidence * 0.6, 3)
         verdict.grounded = False
         verdict.objects = []

@@ -6,7 +6,7 @@ import { timeAgo } from '../util'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { EventIcon } from '../components/ui-kit'
+import { EventIcon, GroundingBadge } from '../components/ui-kit'
 
 type ActionFilter = 'all' | 'action_needed' | 'action_done' | 'no_action_needed'
 type ActionState = 'action_needed' | 'action_done' | 'no_action_needed'
@@ -182,6 +182,7 @@ export function Events({ store }: { store: Store }) {
                         <Badge variant="outline" className={actionClasses(actionState)}>
                           {actionLabel(actionState)}
                         </Badge>
+                        <GroundingBadge payload={e.payload} />
                         {runs.length > 0 && (
                           <span className="text-xs text-muted-foreground">
                             {runs
@@ -196,6 +197,9 @@ export function Events({ store }: { store: Store }) {
                     <div className="text-right">
                       <div className="text-sm font-semibold tabular-nums" style={{ color: m.color }}>
                         {Math.round(e.confidence * 100)}%
+                      </div>
+                      <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                        fused
                       </div>
                       <div className="text-xs text-muted-foreground">{timeAgo(e.timestamp)}</div>
                     </div>

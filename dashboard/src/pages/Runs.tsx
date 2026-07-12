@@ -4,7 +4,7 @@ import { eventMeta } from '../constants'
 import { timeAgo } from '../util'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { StatusDot, EventIcon } from '../components/ui-kit'
+import { StatusDot, EventIcon, GroundingBadge } from '../components/ui-kit'
 import { cn } from '@/lib/utils'
 import { Check, Loader2, ExternalLink } from 'lucide-react'
 
@@ -63,6 +63,9 @@ function RunCard({ run }: { run: Run }) {
               <div className="text-xs text-muted-foreground">
                 {m?.label ?? run.event.event_type} in {run.event.location} ·{' '}
                 {Math.round(run.event.confidence * 100)}%
+              </div>
+              <div className="mt-1">
+                <GroundingBadge payload={run.event.payload} />
               </div>
             </div>
           </div>

@@ -18,6 +18,7 @@ from datetime import datetime
 from . import emit as emit_mod
 from . import fusion as fusion_mod
 from . import grounding as grounding_mod
+from . import objects as objects_mod
 from . import sampler as sampler_mod
 from . import vlm as vlm_mod
 
@@ -56,7 +57,15 @@ class TrafficAggregator:
 
 def run(cfg, args) -> int:
     detector = vlm_mod.build_detector(cfg, mock=args.mock)
-    grounder = grounding_mod.GroundingDetector(cfg)
+    # Select the grounding backend the same way the detect server does: local
+    # YOLO is the working path; NVIDIA's hosted DINO is a deprecated fallback.
+    # Grounding is a no-op in --mock mode (no frames worth detecting on).
+    if args.mock:
+        grounder = grounding_mod.GroundingDetector(cfg)  # disabled without a key
+    elif cfg.grounding_backend == "yolo":
+        grounder = objects_mod.YoloDetector(cfg)
+    else:
+        grounder = grounding_mod.GroundingDetector(cfg)
     emitter = emit_mod.Emitter(
         automation_url=None if args.dump else args.automation_url,
         dump_path=args.dump,
@@ -79,7 +88,10 @@ def run(cfg, args) -> int:
         if args.mock or not discovery or cfg.discover_model == cfg.model
         else f"discover={cfg.discover_model} verify={cfg.model}"
     )
-    ground_line = " +grounding(dino)" if grounder.enabled and not args.mock else ""
+    ground_line = ""
+    if getattr(grounder, "enabled", False) and not args.mock:
+        backend = "yolo" if cfg.grounding_backend == "yolo" else "dino"
+        ground_line = f" +grounding({backend})"
     print(
         f"perception: source={args.source} zone={args.zone} fps={args.fps} "
         f"mode={mode} {model_line}{ground_line}\n            {sink}",
@@ -143,6 +155,13 @@ def run(cfg, args) -> int:
 
                 if event_type == "person_count" and traffic:
                     traffic.add(verdict.count or 0)
+
+                # Confirm/deny with the object detector before thresholding, same
+                # as the discovery path — so a corroborated detection is boosted
+                # and a hallucinated one is cut, and the event carries the honest
+                # vlm_confidence / grounded / objects breakdown either way.
+                if verdict.detected:
+                    fusion_mod.ground_verdicts(grounder, frame.image, [verdict])
 
                 if verdict.detected and verdict.confidence >= args.min_confidence:
                     if not cooled_down(event_type, frame.timestamp):
