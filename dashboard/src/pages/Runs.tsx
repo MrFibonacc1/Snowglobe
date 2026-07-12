@@ -14,7 +14,7 @@ export function Runs({ store }: { store: Store }) {
   return (
     <div className="flex flex-col gap-6">
       {store.backendOnline === false && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-800">
           Automation backend unreachable. No live runs. Start it with{' '}
           <code className="rounded bg-background/50 px-1">uvicorn main:app --port 8000</code>, then
           Go live.
@@ -119,7 +119,7 @@ function StepRow({ step, last }: { step: RunStep; last: boolean }) {
         <StepDetail step={step} />
         {replay && (
           <a
-            className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+            className="mt-1 inline-flex items-center gap-1 rounded-sm text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             href={replay}
             target="_blank"
             rel="noreferrer"
@@ -170,8 +170,8 @@ function StepDetail({ step }: { step: RunStep }) {
     // The agent's actual answer is the most useful thing to show.
     if (out.answer) {
       return (
-        <div className="tl-sub">
-          <span className="faint">{String(out.backend ?? 'agent')} · </span>
+        <div className="text-xs text-muted-foreground">
+          <span className="opacity-70">{String(out.backend ?? 'agent')} · </span>
           {String(out.answer)}
         </div>
       )
@@ -205,8 +205,8 @@ function StepDetail({ step }: { step: RunStep }) {
   }
   if (step.type === 'mcp') {
     return (
-      <div className="tl-sub">
-        <span className="faint">{String(out.tool ?? 'mcp')} · </span>
+      <div className="text-xs text-muted-foreground">
+        <span className="opacity-70">{String(out.tool ?? 'mcp')} · </span>
         {String(out.result ?? '')}
       </div>
     )

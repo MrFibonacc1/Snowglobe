@@ -1,9 +1,27 @@
-opencv-python>=4.9
-numpy>=1.26
-requests>=2.31
-jsonschema>=4.21
-python-dotenv>=1.0
-# Detect API for the dashboard Testing page (perception/server.py)
-fastapi>=0.110
-uvicorn>=0.29
-python-multipart>=0.0.9
+# Perception service dependencies.
+#
+# This service runs server-side (deploy it to any container host — Render,
+# Railway, Fly, ECS, a VM). The dashboard/mobile web-app calls it over HTTP; it
+# runs the VLM (hosted NVIDIA) and a local YOLO object detector for bounding
+# boxes. No detector runs on the end-user's device.
+#
+# torch/torchvision are pinned to the CPU build in the Dockerfile (see the
+# --extra-index-url there) so the image stays small; CPU inference at ~1 fps is
+# plenty for this workload.
+
+fastapi==0.139.0
+uvicorn==0.51.0
+python-multipart==0.0.32          # FastAPI file uploads (UploadFile)
+
+# Vision + detection
+opencv-python-headless==5.0.0.93  # headless: no GUI libs, smaller server image
+numpy==2.5.1
+pillow==12.3.0
+ultralytics==8.4.92               # YOLO object detector (bounding boxes)
+torch==2.13.0
+torchvision==0.28.0
+
+# VLM calls + config + schema validation
+requests==2.34.2
+python-dotenv==1.2.2
+jsonschema==4.26.0

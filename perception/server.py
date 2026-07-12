@@ -24,6 +24,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from . import emit as emit_mod
+from . import fusion as fusion_mod
+from . import grounding as grounding_mod
+from . import live as live_mod
+from . import objects as objects_mod
 from . import vlm as vlm_mod
 from .config import Config
 from .sampler import Frame, sample_frames
@@ -38,6 +42,22 @@ app.add_middleware(
 
 _cfg = Config.from_env()
 _detectors: dict[bool, object] = {}
+# Object grounding backend. YOLO runs locally inside this service (the working
+# path); DINO is the deprecated NVIDIA hosted detector kept as a fallback option.
+if _cfg.grounding_backend == "yolo":
+    _grounder = objects_mod.YoloDetector(_cfg)
+    _grounding_kind = "yolo"
+else:
+    _grounder = grounding_mod.GroundingDetector(_cfg)
+    _grounding_kind = "grounding-dino"
+_live = live_mod.LiveManager(_cfg)
+
+
+def _grounding_model_name():
+    """Human label for the active grounding backend, only if it's live."""
+    if not getattr(_grounder, "enabled", False):
+        return None
+    return getattr(_grounder, "model_name", None) or _grounding_kind
 
 
 def _detector(mock: bool):
@@ -54,8 +74,50 @@ def health():
         "ok": True,
         "model": _cfg.model,
         "discover_model": _cfg.discover_model,
+        "grounding": _grounder.enabled,
+        "grounding_model": _grounding_model_name(),
         "has_key": bool(_cfg.api_key),
     }
+
+
+# --- live cameras -----------------------------------------------------------
+# Start/stop the full perception pipeline on a live source (webcam / rtsp:// /
+# http(s)://). Each camera runs in a background worker thread and streams events
+# to the automation service just like a clip would.
+
+@app.post("/live/start")
+def live_start(body: dict):
+    camera_id = str(body.get("camera_id") or body.get("zone") or "cam")
+    source = str(body.get("source") or body.get("url") or "webcam")
+    zone = str(body.get("zone") or camera_id)
+    fps = float(body.get("fps", 1.0) or 1.0)
+    events = str(body.get("events", "") or "")
+    min_confidence = float(body.get("min_confidence", 0.5) or 0.5)
+    if not source:
+        return JSONResponse(status_code=400, content={"error": "source is required"})
+    status = _live.start(camera_id, source, zone, fps, events, min_confidence)
+    return {"ok": True, "grounding": _grounder.enabled, "live": status}
+
+
+@app.post("/live/stop")
+def live_stop(body: dict):
+    camera_id = str(body.get("camera_id") or body.get("zone") or "")
+    if not camera_id:
+        return JSONResponse(status_code=400, content={"error": "camera_id is required"})
+    status = _live.stop_camera(camera_id)
+    if status is None:
+        return JSONResponse(status_code=404, content={"error": "camera not found"})
+    return {"ok": True, "live": status}
+
+
+@app.get("/live/status")
+def live_status(camera_id: str | None = None):
+    return {"grounding": _grounder.enabled, "cameras": _live.status(camera_id)}
+
+
+@app.on_event("shutdown")
+def _shutdown():
+    _live.stop_all()
 
 
 @app.post("/detect")
@@ -98,6 +160,8 @@ async def detect(
             found = detector.discover(frame_img)
         except Exception as e:
             return JSONResponse(status_code=502, content={"error": f"discover failed: {e}"})
+        # Confirm/deny with the fast object detector (no-op if grounding is off).
+        fusion_mod.ground_verdicts(_grounder, frame_img, found)
         elapsed_ms = round((time.perf_counter() - t) * 1000)
         for v in found:
             verdicts.append(
@@ -107,6 +171,8 @@ async def detect(
                     "confidence": round(v.confidence, 3),
                     "count": v.count,
                     "detail": v.detail,
+                    "grounded": v.grounded,
+                    "objects": v.objects,
                     "elapsed_ms": elapsed_ms,
                 }
             )
@@ -118,6 +184,8 @@ async def detect(
                     )
                 )
         return {"kind": "image", "model": discover_tag, "mock": used_mock,
+                "grounding": any(v.get("grounded") is not None for v in verdicts),
+                "grounding_model": _grounding_model_name(),
                 "mode": "discover", "verdicts": verdicts, "events": emitted}
 
     for et in requested:
@@ -211,7 +279,9 @@ async def detect_video(
     # keep us under hosted rate limits.
     if discovery:
         def run_pair(fr, _et):
-            return fr.seq, None, detector.discover(fr.image)
+            found = detector.discover(fr.image)
+            fusion_mod.ground_verdicts(_grounder, fr.image, found)
+            return fr.seq, None, found
         jobs = [(fr, None) for fr in frames]
     else:
         def run_pair(fr, et):
@@ -240,7 +310,8 @@ async def detect_video(
             for v in discovered.get(fr.seq, []):
                 vs.append({"event_type": v.event_type, "detected": v.detected,
                            "confidence": round(v.confidence, 3),
-                           "count": v.count, "detail": v.detail})
+                           "count": v.count, "detail": v.detail,
+                           "grounded": v.grounded, "objects": v.objects})
         else:
             for et in requested:
                 v = verdict_map.get((fr.seq, et))
@@ -289,8 +360,13 @@ async def detect_video(
                                      snapshot_base_url=_cfg.snapshot_base_url, model=emit_tag)
             )
 
+    grounded_any = discovery and any(
+        v.grounded is not None for vs in discovered.values() for v in vs
+    )
     return {
         "kind": "video", "model": emit_tag, "mock": used_mock,
+        "grounding": grounded_any,
+        "grounding_model": _grounding_model_name(),
         "mode": "discover" if discovery else "targeted",
         "fps": fps, "frames_analyzed": len(frames),
         "frames": frames_out, "summary": summary, "events": events_out,

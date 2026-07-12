@@ -16,6 +16,8 @@ import sys
 from datetime import datetime
 
 from . import emit as emit_mod
+from . import fusion as fusion_mod
+from . import grounding as grounding_mod
 from . import sampler as sampler_mod
 from . import vlm as vlm_mod
 
@@ -54,6 +56,7 @@ class TrafficAggregator:
 
 def run(cfg, args) -> int:
     detector = vlm_mod.build_detector(cfg, mock=args.mock)
+    grounder = grounding_mod.GroundingDetector(cfg)
     emitter = emit_mod.Emitter(
         automation_url=None if args.dump else args.automation_url,
         dump_path=args.dump,
@@ -76,9 +79,10 @@ def run(cfg, args) -> int:
         if args.mock or not discovery or cfg.discover_model == cfg.model
         else f"discover={cfg.discover_model} verify={cfg.model}"
     )
+    ground_line = " +grounding(dino)" if grounder.enabled and not args.mock else ""
     print(
         f"perception: source={args.source} zone={args.zone} fps={args.fps} "
-        f"mode={mode} {model_line}\n            {sink}",
+        f"mode={mode} {model_line}{ground_line}\n            {sink}",
         file=sys.stderr,
     )
 
@@ -103,6 +107,7 @@ def run(cfg, args) -> int:
             limit=args.limit,
             max_seconds=args.max_seconds,
             save=not args.no_save,
+            should_stop=getattr(args, "should_stop", None),
         ):
             n_frames += 1
 
@@ -112,6 +117,9 @@ def run(cfg, args) -> int:
                 except Exception as e:  # never let one bad call kill the loop
                     print(f"  ! discover() failed: {e}", file=sys.stderr)
                     findings = []
+                # Confirm/deny each finding with the fast object detector before
+                # thresholding, so grounding can rescue or kill a borderline call.
+                fusion_mod.ground_verdicts(grounder, frame.image, findings)
                 for verdict in findings:
                     if verdict.confidence < args.min_confidence:
                         continue
@@ -178,6 +186,11 @@ def _log_event(event, verdict):
         extra = f" count={verdict.count}"
     elif verdict.detail:
         extra = f" · {verdict.detail}"
+    if verdict.grounded is True:
+        objs = ", ".join(o["phrase"] for o in (verdict.objects or [])[:3])
+        extra += f" [grounded: {objs}]" if objs else " [grounded]"
+    elif verdict.grounded is False:
+        extra += " [ungrounded]"
     print(
         f"  → {event['event_type']:16} {event['location']:8} "
         f"conf={event['confidence']:.2f}{extra}",

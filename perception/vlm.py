@@ -26,6 +26,12 @@ class Verdict:
     count: int | None = None
     detail: str | None = None
     severity: str | None = None
+    # Grounding (Grounding DINO) corroboration, filled in by fusion.py:
+    #   grounded=True  → the object detector confirmed the finding
+    #   grounded=False → we looked for supporting objects and found none
+    #   grounded=None  → grounding was not run for this verdict
+    grounded: bool | None = None
+    objects: list | None = None  # [{phrase, confidence, boxes}]
     raw: str = ""
 
     def payload(self) -> dict:
@@ -36,6 +42,10 @@ class Verdict:
             p["detail"] = self.detail
         if self.severity:
             p["severity"] = self.severity
+        if self.grounded is not None:
+            p["grounded"] = self.grounded
+        if self.objects:
+            p["objects"] = self.objects
         return p
 
 

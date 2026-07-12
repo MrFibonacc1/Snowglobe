@@ -122,7 +122,7 @@ export function WorkflowBuilder({ store }: { store: Store }) {
   return (
     <div className="flex flex-col gap-6">
       {store.backendOnline === false && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-800">
           Automation backend unreachable. Editing local copies. Start it with{' '}
           <code className="rounded bg-background/50 px-1">uvicorn main:app --port 8000</code> then
           use Reset demo to sync.

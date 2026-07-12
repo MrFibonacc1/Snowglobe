@@ -41,12 +41,16 @@ def sample_frames(
     limit: int | None = None,
     max_seconds: float | None = None,
     save: bool = True,
+    should_stop=None,
 ):
     """Yield Frame objects at approximately `fps`.
 
     For files with a known frame rate we skip frames deterministically (so a
     10 s clip yields ~3 frames at 0.3 fps regardless of playback speed). For live
     sources we gate on wall-clock time.
+
+    `should_stop`, if given, is a zero-arg callable polled each iteration; when
+    it returns True the generator stops cleanly (used to Pause a live camera).
     """
     resolved = resolve_source(source)
     cap = cv2.VideoCapture(resolved)
@@ -68,6 +72,8 @@ def sample_frames(
     last_taken = 0.0
     try:
         while True:
+            if should_stop is not None and should_stop():
+                break
             ok, image = cap.read()
             if not ok:
                 break  # end of file or dropped stream

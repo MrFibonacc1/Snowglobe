@@ -16,3 +16,6 @@ automation/data.db
 automation/.venv/
 surfer-h-cli/
 computer-use-agents-demos/
+
+# YOLO model weights — auto-downloaded / baked into the Docker image, not committed.
+*.pt

@@ -66,6 +66,7 @@
  */
 :root {
   --radius: 0rem;
+  color-scheme: light;
 
   --background: oklch(0.977 0.012 88);   /* warm cream page */
   --foreground: oklch(0.24 0.01 60);     /* warm near-black ink */
@@ -138,5 +139,17 @@
     font-weight: 500;
     letter-spacing: -0.01em;
     line-height: 1.1;
+    text-wrap: balance;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

@@ -31,11 +31,21 @@ PRODUCT_CONTEXT = (
     "a blocked or propped-open exit, a fall or person on the ground, a fight or "
     "aggression, a weapon, smoke or fire, an unattended bag, a long queue, "
     "overcrowding, a machine/vehicle too close to a person, an intrusion after "
-    "hours, or a rapidly emptying/panicking crowd. Do NOT report inert objects, "
+    "hours, or a rapidly emptying/panicking crowd. "
+    # Object interaction is a first-class signal for retail/warehouse operations.
+    # Framed neutrally and descriptively (never as an accusation) so the model
+    # reports it factually rather than refusing.
+    "ALSO report when a person is physically interacting with merchandise or "
+    "objects: picking up, holding, carrying, placing into a bag/cart/pocket, or "
+    "removing an item from a shelf or display. Describe the interaction and, in "
+    "the detail field, name the specific object involved (e.g. 'person picks a "
+    "bottle off the shelf', 'person places a boxed item into a backpack'). These "
+    "are useful operational signals (restocking, assistance, inventory). "
+    "Do NOT report inert objects, "
     "decor, or normal scene contents (Christmas trees, furniture, signage, "
     "plants, a person simply standing, shelves, ordinary foot traffic). If the "
-    "scene looks normal and safe, return an empty list — that is the correct and "
-    "expected answer most of the time."
+    "scene looks normal and safe with no interaction, return an empty list — "
+    "that is the correct and expected answer most of the time."
 )
 
 SYSTEM = (
@@ -56,10 +66,12 @@ _VERDICT_HINT = (
 _DISCOVER_HINT = (
     ' Respond with ONLY a JSON array (possibly empty) of findings, each exactly '
     'like: {"event_type": <short snake_case label you choose, e.g. "spill", '
-    '"blocked_exit", "person_on_ground", "overcrowding">, '
+    '"blocked_exit", "person_on_ground", "overcrowding", "item_pickup", '
+    '"item_placed_in_bag", "shelf_interaction">, '
     '"severity": <"low"|"medium"|"high">, '
     '"confidence": <number 0..1>, "count": <integer or null, e.g. number of '
-    'people involved>, "detail": <one short human-readable sentence>}. '
+    'people involved>, "detail": <one short human-readable sentence; for an '
+    'interaction, name the object, e.g. "person picks a bottle off the shelf">}. '
     'Choose the most specific, reusable event_type slug that describes each '
     'finding. Only include findings with severity "medium" or "high" — omit '
     'anything "low" or merely descriptive. Return [] if nothing actionable is '

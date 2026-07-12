@@ -54,6 +54,12 @@ DEFAULT_AUTOMATION_URL = "http://localhost:8000"
 # Static host for saved frames; see snapshot_server.py. None → emit local paths.
 DEFAULT_SNAPSHOT_BASE_URL = "http://localhost:8001"
 
+# Grounding: NVIDIA's hosted open-vocabulary object detector (Grounding DINO).
+# Used as a fast, cheap second opinion to confirm/deny the VLM's discovery
+# findings (see grounding.py + fusion.py). Free hosted endpoint, Bearer auth
+# with the same NVIDIA_API_KEY. On by default when a key is present.
+DEFAULT_GROUNDING_URL = "https://ai.api.nvidia.com/v1/cv/nvidia/nv-grounding-dino"
+
 
 @dataclass
 class Config:
@@ -68,6 +74,15 @@ class Config:
     request_timeout: float
     temperature: float
     max_tokens: int
+    # Grounding (Grounding DINO) second-opinion object detection.
+    grounding_enabled: bool
+    grounding_url: str
+    grounding_threshold: float
+    grounding_timeout: float
+    # Local YOLO object detector (the real, working grounding backend).
+    grounding_backend: str
+    yolo_model: str
+    yolo_conf: float
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -79,8 +94,14 @@ class Config:
         model = os.getenv("VLM_MODEL", DEFAULT_MODEL)
         # Empty VLM_DISCOVER_MODEL → reuse the primary model for discovery too.
         discover_model = os.getenv("VLM_DISCOVER_MODEL", DEFAULT_DISCOVER_MODEL) or model
+        api_key = os.getenv("VLM_API_KEY") or os.getenv("NVIDIA_API_KEY")
+        # Grounding DINO is hosted by NVIDIA and always Bearer-authed with the
+        # NVIDIA key, independent of where the VLM lives (a Baseten VLM key
+        # wouldn't work here, so prefer NVIDIA_API_KEY for grounding).
+        grounding_key = os.getenv("NVIDIA_API_KEY") or api_key
+        grounding_default = "1" if grounding_key else "0"
         return cls(
-            api_key=os.getenv("VLM_API_KEY") or os.getenv("NVIDIA_API_KEY"),
+            api_key=api_key,
             auth_scheme=os.getenv("VLM_AUTH_SCHEME", "bearer").strip().lower(),
             base_url=os.getenv("VLM_BASE_URL", DEFAULT_BASE_URL),
             model=model,
@@ -91,4 +112,13 @@ class Config:
             request_timeout=float(os.getenv("VLM_TIMEOUT", "60")),
             temperature=float(os.getenv("VLM_TEMPERATURE", "0.1")),
             max_tokens=int(os.getenv("VLM_MAX_TOKENS", "512")),
+            grounding_enabled=os.getenv("GROUNDING_ENABLED", grounding_default) not in ("0", "false", "False", ""),
+            grounding_url=os.getenv("GROUNDING_URL", DEFAULT_GROUNDING_URL),
+            grounding_threshold=float(os.getenv("GROUNDING_THRESHOLD", "0.3")),
+            grounding_timeout=float(os.getenv("GROUNDING_TIMEOUT", "15")),
+            # "yolo" (local, works) or "none". Defaults to yolo since NVIDIA's
+            # hosted DINO is deprecated and unusable.
+            grounding_backend=os.getenv("GROUNDING_BACKEND", "yolo").strip().lower(),
+            yolo_model=os.getenv("YOLO_MODEL", "yolov8s.pt"),
+            yolo_conf=float(os.getenv("YOLO_CONF", "0.25")),
         )

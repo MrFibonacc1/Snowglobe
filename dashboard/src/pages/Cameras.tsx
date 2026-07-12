@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Store } from '../store'
 import type { Camera, CameraSource, EventType } from '../types'
 import { SUGGESTED_EVENT_TYPES, eventMeta, SOURCE_LABEL } from '../constants'
+import { api } from '../api'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,7 +19,7 @@ import {
 } from '@/components/ui/dialog'
 import { StatusDot, EventIcon } from '../components/ui-kit'
 import { cn } from '@/lib/utils'
-import { Plus, Trash2, Camera as CameraIcon } from 'lucide-react'
+import { Plus, Trash2, Camera as CameraIcon, ScanSearch } from 'lucide-react'
 
 const SOURCES: { id: CameraSource; d: string }[] = [
   { id: 'webcam', d: 'This machine' },
@@ -77,11 +78,45 @@ function EmptyState({ children }: { children: React.ReactNode }) {
 
 function CameraCard({ cam, store }: { cam: Camera; store: Store }) {
   const [snapBroken, setSnapBroken] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [liveError, setLiveError] = useState<string | null>(null)
   // Latest event from this camera's zone that carries a frame — the closest
   // thing to a live preview without streaming video into the browser.
   const snap = store.events.find(
     (e) => e.location === cam.zone && e.snapshot_url,
   )?.snapshot_url
+
+  // Resolve a Camera into the source string the perception sampler understands.
+  const perceptionSource = (c: Camera): string =>
+    c.source === 'webcam' ? 'webcam' : c.url?.trim() || 'webcam'
+
+  const goLive = cam.status !== 'live'
+
+  async function toggleLive() {
+    // Optimistically flip local state so the demo stays responsive even when
+    // the perception service isn't running; then try the real live pipeline.
+    store.toggleCamera(cam.id)
+    if (!api.perceptionConfigured()) return
+    setBusy(true)
+    setLiveError(null)
+    try {
+      if (goLive) {
+        await api.liveStart({
+          camera_id: cam.id,
+          source: perceptionSource(cam),
+          zone: cam.zone,
+          fps: cam.fps || 1,
+          events: cam.detects.join(','),
+        })
+      } else {
+        await api.liveStop(cam.id)
+      }
+    } catch (e) {
+      setLiveError(e instanceof Error ? e.message : 'live control failed')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <Card className="overflow-hidden pt-0">
@@ -132,10 +167,20 @@ function CameraCard({ cam, store }: { cam: Camera; store: Store }) {
             </Badge>
           ))}
         </div>
+        {liveError && (
+          <p className="text-xs text-amber-800">
+            Live pipeline unreachable — showing local state only.
+          </p>
+        )}
         <div className="mt-1 flex items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={() => store.toggleCamera(cam.id)}>
-            {cam.status === 'live' ? 'Pause' : 'Resume'}
+          <Button variant="secondary" size="sm" disabled={busy} onClick={toggleLive}>
+            {busy ? '…' : cam.status === 'live' ? 'Pause' : 'Resume'}
           </Button>
+          {cam.status === 'live' && cam.detects.length === 0 && (
+            <Badge variant="outline" className="gap-1 text-xs">
+              <ScanSearch className="size-3" /> grounded discovery
+            </Badge>
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -198,8 +243,9 @@ function AddCameraDialog({
                 <button
                   key={s.id}
                   type="button"
+                  aria-pressed={source === s.id}
                   className={cn(
-                    'rounded-lg border p-3 text-left transition-colors',
+                    'rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     source === s.id
                       ? 'border-primary bg-primary/10'
                       : 'hover:bg-accent',
@@ -329,8 +375,9 @@ export function PillToggle({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={selected}
       className={cn(
-        'inline-flex items-center gap-1 rounded-none border px-3 py-1 text-xs font-medium transition-colors',
+        'inline-flex items-center gap-1 rounded-none border px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         selected
           ? 'border-primary bg-primary/15 text-foreground'
           : 'text-muted-foreground hover:bg-accent',

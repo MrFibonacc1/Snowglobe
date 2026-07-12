@@ -8,6 +8,10 @@ export const AUTOMATION_URL = import.meta.env.VITE_AUTOMATION_URL as
   | string
   | undefined
 
+export const PERCEPTION_URL =
+  (import.meta.env.VITE_PERCEPTION_URL as string | undefined) ??
+  'http://localhost:8008'
+
 const TIMEOUT_MS = 3000
 
 class ApiError extends Error {}
@@ -25,6 +29,33 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
+}
+
+// Perception service (the VLM + grounding detect / live-camera control API).
+// Separate base URL because it runs as its own uvicorn app on another port.
+async function preq<T>(path: string, init?: RequestInit): Promise<T> {
+  if (!PERCEPTION_URL) throw new ApiError('VITE_PERCEPTION_URL not set')
+  const res = await fetch(`${PERCEPTION_URL}${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new ApiError(`${init?.method ?? 'GET'} ${path} → ${res.status} ${body.slice(0, 200)}`)
+  }
+  return (await res.json()) as T
+}
+
+export interface LiveCameraStatus {
+  camera_id: string
+  zone: string
+  source: string
+  fps: number
+  mode: 'discover' | 'targeted'
+  running: boolean
+  started_at: string
+  error: string | null
 }
 
 export interface BackendStatus {
@@ -65,4 +96,26 @@ export const api = {
   // runs
   listRuns: (limit = 50) => req<Run[]>(`/runs?limit=${limit}`),
   getRun: (id: string) => req<Run>(`/runs/${id}`),
+
+  // live cameras (perception service)
+  perceptionConfigured: () => Boolean(PERCEPTION_URL),
+  liveStart: (body: {
+    camera_id: string
+    source: string
+    zone: string
+    fps?: number
+    events?: string
+    min_confidence?: number
+  }) =>
+    preq<{ ok: boolean; grounding: boolean; live: LiveCameraStatus }>(
+      '/live/start',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  liveStop: (camera_id: string) =>
+    preq<{ ok: boolean; live: LiveCameraStatus }>('/live/stop', {
+      method: 'POST',
+      body: JSON.stringify({ camera_id }),
+    }),
+  liveStatus: () =>
+    preq<{ grounding: boolean; cameras: LiveCameraStatus[] }>('/live/status'),
 }

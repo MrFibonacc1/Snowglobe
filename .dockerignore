@@ -1,0 +1,13 @@
+**/.venv
+**/__pycache__
+**/*.pyc
+dashboard/node_modules
+dashboard/dist
+sample_data
+snapshots
+demo
+nemoclaw
+tasks
+*.mp4
+*.pt
+.git

@@ -11,7 +11,7 @@ import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { PillToggle } from './Cameras'
 import { ConfidenceBar, EventIcon } from '../components/ui-kit'
-import { Upload, Check, Loader2 } from 'lucide-react'
+import { Upload, Check, Loader2, ShieldCheck, ShieldAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api } from '../api'
 
@@ -19,12 +19,19 @@ const PERCEPTION_URL =
   (import.meta.env.VITE_PERCEPTION_URL as string | undefined) ?? 'http://localhost:8008'
 const TESTING_SESSION_KEY = 'snowglobe.testing.session.v1'
 
+interface GroundedObject {
+  phrase: string
+  confidence: number
+  boxes: number[][]
+}
 interface Verdict {
   event_type: EventType
   detected?: boolean
   confidence?: number
   count?: number | null
   detail?: string | null
+  grounded?: boolean | null
+  objects?: GroundedObject[] | null
   elapsed_ms?: number
   error?: string
 }
@@ -47,6 +54,8 @@ interface DetectResult {
   model: string
   mock: boolean
   mode?: string
+  grounding?: boolean
+  grounding_model?: string | null
   verdicts?: Verdict[] // image
   frames?: FrameResult[] // video
   summary?: SummaryRow[] // video
@@ -363,11 +372,20 @@ export function Testing({ store }: { store: Store }) {
       <Card>
         <CardContent className="flex flex-col gap-4">
           <div
+            role="button"
+            tabIndex={preview ? -1 : 0}
+            aria-label="Upload an image or video"
             className={cn(
-              'flex min-h-52 cursor-pointer items-center justify-center overflow-hidden rounded-lg border-2 border-dashed transition-colors',
+              'flex min-h-52 cursor-pointer items-center justify-center overflow-hidden rounded-lg border-2 border-dashed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               dragging ? 'border-primary bg-primary/5' : 'hover:border-muted-foreground/40',
             )}
             onClick={() => !preview && inputRef.current?.click()}
+            onKeyDown={(e) => {
+              if (!preview && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault()
+                inputRef.current?.click()
+              }
+            }}
             onDragOver={(e) => {
               e.preventDefault()
               setDragging(true)
@@ -380,12 +398,11 @@ export function Testing({ store }: { store: Store }) {
             }}
           >
             {preview && isVideo ? (
-              <video
-                  src={preview}
-                  controls
-                  className="max-h-72 w-full object-contain"
-                  onLoadedMetadata={(e) => setVideoDuration(e.currentTarget.duration)}
-                />
+              <VideoWithBoxes
+                src={preview}
+                frames={result?.frames ?? []}
+                onLoadedMetadata={(d) => setVideoDuration(d)}
+              />
             ) : preview ? (
               <img src={preview} alt="upload preview" className="max-h-72 w-full object-contain" />
             ) : fileMeta ? (
@@ -411,6 +428,7 @@ export function Testing({ store }: { store: Store }) {
               ref={inputRef}
               type="file"
               accept="image/*,video/*"
+              aria-label="Choose an image or video file"
               hidden
               onChange={(e) => pick(e.target.files?.[0])}
             />
@@ -511,9 +529,24 @@ export function Testing({ store }: { store: Store }) {
 
       {/* Right: results */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
           <CardTitle>Results</CardTitle>
-          {result && <Badge variant="secondary">{result.mock ? 'mock' : result.model}</Badge>}
+          {result && (
+            <div className="flex min-w-0 items-center gap-1.5">
+              {result.grounding && (
+                <Badge
+                  variant="outline"
+                  className="gap-1 whitespace-nowrap"
+                  title={result.grounding_model ? `Boxes from ${result.grounding_model}` : 'Object detector confirmed findings'}
+                >
+                  <ShieldCheck className="size-3" /> grounded
+                </Badge>
+              )}
+              <Badge variant="secondary" className="max-w-[220px] truncate" title={result.mock ? 'mock' : result.model}>
+                {result.mock ? 'mock' : result.model}
+              </Badge>
+            </div>
+          )}
         </CardHeader>
         <CardContent>
           {error && (
@@ -590,6 +623,7 @@ export function Testing({ store }: { store: Store }) {
                               {v.detail && ` · ${v.detail}`}
                               {typeof v.elapsed_ms === 'number' && ` · ${v.elapsed_ms}ms`}
                             </div>
+                            <GroundingNote grounded={v.grounded} objects={v.objects} />
                           </>
                         )}
                       </div>
@@ -639,6 +673,253 @@ function parseResultEvents(raw: Record<string, unknown>[]): AppEvent[] {
       }
     })
     .filter((event): event is AppEvent => Boolean(event))
+}
+
+function GroundingNote({
+  grounded,
+  objects,
+}: {
+  grounded?: boolean | null
+  objects?: { phrase: string; confidence: number }[] | null
+}) {
+  // grounded null/undefined → the object detector wasn't consulted (grounding
+  // off, or a targeted verdict); render nothing.
+  if (grounded === undefined || grounded === null) return null
+  if (grounded) {
+    const seen = (objects ?? [])
+      .map((o) => o.phrase)
+      .slice(0, 3)
+      .join(', ')
+    return (
+      <div className="mt-1 inline-flex items-center gap-1 text-xs text-emerald-600">
+        <ShieldCheck className="size-3" />
+        Confirmed by object detector{seen && `: ${seen}`}
+      </div>
+    )
+  }
+  return (
+    <div className="mt-1 inline-flex items-center gap-1 text-xs text-amber-700">
+      <ShieldAlert className="size-3" />
+      Not corroborated by object detector — confidence reduced
+    </div>
+  )
+}
+
+// A sampled frame with the object detector's bounding boxes overlaid. Boxes are
+// normalized [x1,y1,x2,y2] in 0..1. We render the image with object-contain (not
+// cover) so no part is cropped and the normalized coords line up exactly with
+// the SVG overlay (viewBox 0..100, also non-distorting). `size` picks the strip
+// thumb (tiny) vs the detection gallery (large + labels).
+function FrameThumb({
+  thumb,
+  index,
+  verdicts,
+  size = 'thumb',
+}: {
+  thumb: string
+  index: number
+  verdicts: Verdict[]
+  size?: 'thumb' | 'large'
+}) {
+  const boxes: { x: number; y: number; w: number; h: number; label: string }[] = []
+  for (const v of verdicts) {
+    for (const o of v.objects ?? []) {
+      for (const b of o.boxes ?? []) {
+        if (b.length === 4) {
+          const [x1, y1, x2, y2] = b
+          boxes.push({
+            x: x1 * 100,
+            y: y1 * 100,
+            w: (x2 - x1) * 100,
+            h: (y2 - y1) * 100,
+            label: o.phrase,
+          })
+        }
+      }
+    }
+  }
+  const large = size === 'large'
+  // The image sizes the box; the SVG is stretched to exactly cover the image
+  // (both share the same rectangle), so normalized coords map 1:1 regardless of
+  // the frame's aspect ratio. Using object-fill on a container that matches the
+  // image avoids any letterbox/crop drift between the image and the overlay.
+  return (
+    <div
+      className={cn(
+        'relative w-full overflow-hidden rounded-md border bg-muted',
+        large ? 'max-w-md' : 'h-16',
+      )}
+    >
+      <img
+        src={thumb}
+        alt={`frame ${index}`}
+        className={cn('block w-full', large ? 'h-auto' : 'h-16 object-cover')}
+      />
+      {boxes.length > 0 && (
+        <svg
+          className="pointer-events-none absolute inset-0 h-full w-full"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
+          {boxes.map((b, i) => (
+            <g key={i}>
+              <rect
+                x={b.x}
+                y={b.y}
+                width={b.w}
+                height={b.h}
+                fill="none"
+                stroke="#c1440e"
+                strokeWidth={large ? 2 : 1.5}
+                vectorEffect="non-scaling-stroke"
+              />
+              {large && (
+                <text
+                  x={b.x + 0.5}
+                  y={Math.max(b.y - 1, 3)}
+                  fill="#c1440e"
+                  fontSize={5}
+                  fontWeight={700}
+                >
+                  {b.label}
+                </text>
+              )}
+            </g>
+          ))}
+        </svg>
+      )}
+    </div>
+  )
+}
+
+// The uploaded <video> with detection boxes drawn on top, synced to playback.
+// As the video plays, we pick the analyzed frame whose timestamp is nearest the
+// current time and draw its boxes. Handles object-contain letterboxing so boxes
+// land on the video content, not the black bars.
+function VideoWithBoxes({
+  src,
+  frames,
+  onLoadedMetadata,
+}: {
+  src: string
+  frames: FrameResult[]
+  onLoadedMetadata?: (duration: number) => void
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const [t, setT] = useState(0)
+  // Rendered video rect inside the element (accounts for object-contain bars).
+  const [rect, setRect] = useState<{ left: number; top: number; w: number; h: number } | null>(null)
+
+  const computeRect = useCallback(() => {
+    const v = videoRef.current
+    if (!v || !v.videoWidth || !v.videoHeight) return
+    const cw = v.clientWidth
+    const ch = v.clientHeight
+    const scale = Math.min(cw / v.videoWidth, ch / v.videoHeight)
+    const w = v.videoWidth * scale
+    const h = v.videoHeight * scale
+    setRect({ left: (cw - w) / 2, top: (ch - h) / 2, w, h })
+  }, [])
+
+  useEffect(() => {
+    const onResize = () => computeRect()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [computeRect])
+
+  // Sorted analyzed frames with at least one box.
+  const boxedFrames = useMemo(
+    () =>
+      frames
+        .filter((f) => f.verdicts.some((v) => (v.objects ?? []).some((o) => (o.boxes ?? []).length)))
+        .sort((a, b) => a.t_sec - b.t_sec),
+    [frames],
+  )
+
+  // Nearest boxed frame to the current playback time (within ~1.2s so boxes
+  // don't linger far from where they were detected).
+  const active = useMemo(() => {
+    if (!boxedFrames.length) return null
+    let best = boxedFrames[0]
+    let bestD = Math.abs(best.t_sec - t)
+    for (const f of boxedFrames) {
+      const d = Math.abs(f.t_sec - t)
+      if (d < bestD) {
+        best = f
+        bestD = d
+      }
+    }
+    return bestD <= 1.2 ? best : null
+  }, [boxedFrames, t])
+
+  const boxes = useMemo(() => {
+    const out: { x: number; y: number; w: number; h: number; label: string }[] = []
+    for (const v of active?.verdicts ?? []) {
+      for (const o of v.objects ?? []) {
+        for (const b of o.boxes ?? []) {
+          if (b.length === 4) {
+            const [x1, y1, x2, y2] = b
+            out.push({ x: x1, y: y1, w: x2 - x1, h: y2 - y1, label: o.phrase })
+          }
+        }
+      }
+    }
+    return out
+  }, [active])
+
+  return (
+    <div className="relative max-h-72 w-full">
+      <video
+        ref={videoRef}
+        src={src}
+        controls
+        className="max-h-72 w-full object-contain"
+        onLoadedMetadata={(e) => {
+          onLoadedMetadata?.(e.currentTarget.duration)
+          computeRect()
+        }}
+        onTimeUpdate={(e) => setT(e.currentTarget.currentTime)}
+      />
+      {rect && boxes.length > 0 && (
+        <div
+          className="pointer-events-none absolute"
+          style={{ left: rect.left, top: rect.top, width: rect.w, height: rect.h }}
+        >
+          <svg
+            className="h-full w-full"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            {boxes.map((b, i) => (
+              <g key={i}>
+                <rect
+                  x={b.x * 100}
+                  y={b.y * 100}
+                  width={b.w * 100}
+                  height={b.h * 100}
+                  fill="none"
+                  stroke="#c1440e"
+                  strokeWidth={2}
+                  vectorEffect="non-scaling-stroke"
+                />
+                <text
+                  x={b.x * 100 + 0.5}
+                  y={Math.max(b.y * 100 - 1, 3)}
+                  fill="#c1440e"
+                  fontSize={4}
+                  fontWeight={700}
+                >
+                  {b.label}
+                </text>
+              </g>
+            ))}
+          </svg>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function EventsBlock({ events }: { events: Record<string, unknown>[] }) {
@@ -704,11 +985,7 @@ function VideoResults({ r, minConf }: { r: DetectResult; minConf: number }) {
             )
             return (
               <div key={f.index} className="w-24 shrink-0">
-                <img
-                  src={f.thumb}
-                  alt={`frame ${f.index}`}
-                  className="h-16 w-full rounded-md border object-cover"
-                />
+                <FrameThumb thumb={f.thumb} index={f.index} verdicts={f.verdicts} />
                 <div className="mt-1 text-center text-xs text-muted-foreground tabular-nums">
                   {f.t_sec}s
                 </div>
@@ -732,6 +1009,57 @@ function VideoResults({ r, minConf }: { r: DetectResult; minConf: number }) {
       </div>
 
       <EventsBlock events={r.events ?? []} />
+    </div>
+  )
+}
+
+// Large, labeled gallery of frames with boxes. No longer rendered — the video
+// overlay (VideoWithBoxes) is the primary way boxes are shown — but kept for
+// possible reuse elsewhere.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function DetectionsGallery({
+  frames,
+  groundingModel,
+}: {
+  frames: FrameResult[]
+  groundingModel?: string | null
+}) {
+  const withBoxes = frames.filter((f) =>
+    f.verdicts.some((v) => (v.objects ?? []).some((o) => (o.boxes ?? []).length > 0)),
+  )
+  if (withBoxes.length === 0) return null
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+        Detections
+        {groundingModel && (
+          <Badge variant="outline" className="gap-1 whitespace-nowrap font-normal">
+            <ShieldCheck className="size-3" /> {groundingModel}
+          </Badge>
+        )}
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {withBoxes.map((f) => {
+          const labels = Array.from(
+            new Set(
+              f.verdicts.flatMap((v) => (v.objects ?? []).map((o) => o.phrase)),
+            ),
+          )
+          return (
+            <div key={f.index} className="flex flex-col gap-1">
+              <FrameThumb thumb={f.thumb} index={f.index} verdicts={f.verdicts} size="large" />
+              <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                <span className="tabular-nums">{f.t_sec}s</span>
+                {labels.map((l) => (
+                  <Badge key={l} variant="secondary" className="font-normal">
+                    {l}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
