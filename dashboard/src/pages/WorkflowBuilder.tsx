@@ -43,12 +43,14 @@ import {
   Plug,
   Split,
   Volume2,
+  Wrench,
 } from 'lucide-react'
 
 type StepIcon = ComponentType<{ className?: string; size?: number | string }>
 
 const STEP_TYPES: { id: StepType; label: string; icon: StepIcon }[] = [
   { id: 'h_agent', label: 'H Agent', icon: Bot },
+  { id: 'mcp', label: 'MCP tool', icon: Wrench },
   { id: 'composio', label: 'Composio', icon: Plug },
   { id: 'condition', label: 'Condition', icon: Split },
   { id: 'voice', label: 'Voice', icon: Volume2 },
@@ -233,6 +235,7 @@ export function WorkflowBuilder({ store }: { store: Store }) {
 
 function stepSummary(s: WorkflowStep): string {
   if (s.type === 'h_agent') return `H: ${(s.config.task as string) ?? 'agent'}`
+  if (s.type === 'mcp') return `MCP: ${(s.config.tool as string) || 'tool'}`
   if (s.type === 'composio') return String(s.config.action ?? 'composio')
   if (s.type === 'condition') return 'if …'
   return 'voice'
@@ -472,6 +475,70 @@ function EditorDialog({
   )
 }
 
+function McpConfig({
+  step,
+  onConfig,
+}: {
+  step: WorkflowStep
+  onConfig: (key: string, value: unknown) => void
+}) {
+  const cfg = step.config as Record<string, unknown>
+  // Local text state for the arguments JSON so typing invalid intermediate
+  // JSON doesn't get wiped; we push a parsed object up only when it's valid.
+  const [argsText, setArgsText] = useState(() =>
+    JSON.stringify(cfg.arguments ?? {}, null, 2),
+  )
+  const [argsError, setArgsError] = useState<string | null>(null)
+
+  const onArgs = (text: string) => {
+    setArgsText(text)
+    try {
+      const parsed = text.trim() ? JSON.parse(text) : {}
+      onConfig('arguments', parsed)
+      setArgsError(null)
+    } catch {
+      setArgsError('Invalid JSON — fix before saving')
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Field
+        label="MCP server URL"
+        hint="Any MCP server (Composio toolkit URL, a Google MCP, your own). The engine calls it; H's agent isn't involved."
+      >
+        <Input
+          value={(cfg.server_url as string) ?? ''}
+          onChange={(e) => onConfig('server_url', e.target.value)}
+          placeholder="https://…/mcp"
+        />
+      </Field>
+      <Field label="Tool name" hint="From the server's tools/list, e.g. GOOGLESHEETS_APPEND_ROW">
+        <Input
+          value={(cfg.tool as string) ?? ''}
+          onChange={(e) => onConfig('tool', e.target.value)}
+          placeholder="sheets_append_row"
+        />
+      </Field>
+      <div className="flex flex-col gap-2">
+        <Label>Arguments (JSON)</Label>
+        <Textarea
+          value={argsText}
+          onChange={(e) => onArgs(e.target.value)}
+          rows={5}
+          className="font-mono text-xs"
+          placeholder={'{\n  "spreadsheet": "incidents",\n  "values": ["{{event.location}}"]\n}'}
+        />
+        {argsError ? (
+          <span className="text-xs text-destructive">{argsError}</span>
+        ) : (
+          <TemplateHint />
+        )}
+      </div>
+    </div>
+  )
+}
+
 function TemplateHint() {
   return (
     <span className={cn('block text-xs text-muted-foreground')}>
@@ -617,6 +684,10 @@ function StepConfig({
         />
       </Field>
     )
+  }
+
+  if (step.type === 'mcp') {
+    return <McpConfig step={step} onConfig={onConfig} />
   }
 
   // voice

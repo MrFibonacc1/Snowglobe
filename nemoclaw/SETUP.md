@@ -81,7 +81,7 @@ A workflow can run H agents through the official MCP surface today:
     "tool": "run_agent",
     "arguments": {
       "agent": "h/web-surfer-flash",
-      "message": "Go to <url>. Fill the incident form. Location: {{event.location}}…"
+      "task": "Go to <url>. Fill the incident form. Location: {{event.location}}…"
     } } }
 ```
 
