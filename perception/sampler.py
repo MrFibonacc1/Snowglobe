@@ -47,6 +47,62 @@ def _is_file(resolved) -> bool:
     )
 
 
+def _parse_screen(source: str):
+    """Parse a screen-capture source spec, or None if `source` isn't one.
+
+    'screen'           -> whole primary display
+    'screen:X,Y,W,H'   -> a region (pixels), e.g. capture a Night Owl / QuickTime
+                          live-view window and feed it to the pipeline when the
+                          camera won't expose RTSP.
+    """
+    if source != "screen" and not source.startswith("screen:"):
+        return None
+    spec = source[len("screen"):].lstrip(":").strip()
+    if not spec:
+        return {}  # {} = primary monitor
+    parts = spec.split(",")
+    if len(parts) != 4:
+        raise ValueError("screen source must be 'screen' or 'screen:X,Y,W,H'")
+    x, y, w, h = (int(p.strip()) for p in parts)
+    return {"left": x, "top": y, "width": w, "height": h}
+
+
+class _ScreenCapture:
+    """Minimal cv2.VideoCapture look-alike backed by mss screen grabs, so the
+    sampler treats a screen region exactly like a live camera (BGR frames,
+    wall-clock gating). Needs Screen Recording permission on macOS."""
+
+    def __init__(self, region: dict):
+        import mss  # lazy: optional dep, only for the screen source
+        import numpy as np
+
+        self._np = np
+        self._sct = mss.mss()
+        self._monitor = region or self._sct.monitors[1]  # [1] = primary display
+        self._opened = True
+
+    def isOpened(self) -> bool:
+        return self._opened
+
+    def read(self):
+        try:
+            shot = self._sct.grab(self._monitor)
+        except Exception:  # noqa: BLE001 — treat a failed grab like a dropped frame
+            return False, None
+        bgr = cv2.cvtColor(self._np.asarray(shot), cv2.COLOR_BGRA2BGR)
+        return True, bgr
+
+    def get(self, _prop) -> float:
+        return 0.0  # no native fps → sampler uses wall-clock gating
+
+    def release(self) -> None:
+        try:
+            self._sct.close()
+        except Exception:  # noqa: BLE001
+            pass
+        self._opened = False
+
+
 def sample_frames(
     source: str,
     fps: float = 0.3,
@@ -65,8 +121,13 @@ def sample_frames(
     `should_stop`, if given, is a zero-arg callable polled each iteration; when
     it returns True the generator stops cleanly (used to Pause a live camera).
     """
-    resolved = resolve_source(source)
-    cap = cv2.VideoCapture(resolved)
+    screen_region = _parse_screen(source)
+    if screen_region is not None:
+        cap = _ScreenCapture(screen_region)
+        resolved = None  # sentinel: live, non-file → wall-clock gating
+    else:
+        resolved = resolve_source(source)
+        cap = cv2.VideoCapture(resolved)
     if not cap.isOpened():
         raise RuntimeError(f"Could not open video source: {source!r}")
 
