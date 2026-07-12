@@ -74,6 +74,9 @@ def _run_agent_api(config: dict) -> dict:
     url = config.get("url")
     instructions = config.get("instructions", "")
     message = f"Go to {url}. {instructions}" if url else instructions
+    # Per-step agent choice (a preset like h/web-surfer-pro or a custom agent
+    # built in the H console), falling back to the env default.
+    agent = config.get("agent") or AGENT_NAME
 
     headers = {"Authorization": f"Bearer {api_key}"}
     started = time.time()
@@ -85,7 +88,7 @@ def _run_agent_api(config: dict) -> dict:
         resp = client.post(
             "/sessions",
             json={
-                "agent": AGENT_NAME,
+                "agent": agent,
                 "messages": [{"type": "user_message", "message": message}],
             },
         )
@@ -108,6 +111,7 @@ def _run_agent_api(config: dict) -> dict:
     st = last.get("status") or {}
     return {
         "backend": "agent_api",
+        "agent": agent,
         "session_id": session_id,
         "agent_view_url": view_url,   # live/replay link — surface in the dashboard
         "status": st.get("status"),

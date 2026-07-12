@@ -62,6 +62,15 @@ const STEP_META = Object.fromEntries(STEP_TYPES.map((s) => [s.id, s])) as Record
 >
 
 const H_TASKS = ['google_form', 'ticket', 'custom_url']
+// Preset agents from the H console (platform.hcompany.ai/agents). Custom
+// agents you build there can be referenced by name via the "custom" option.
+const H_AGENTS = [
+  { id: 'h/web-surfer-pro', hint: 'Visual — clicks, forms, dynamic apps' },
+  { id: 'h/web-surfer-flash', hint: 'Visual — faster/cheaper' },
+  { id: 'h/web-scraper-pro', hint: 'Textual — reading-heavy pages' },
+  { id: 'h/web-scraper-flash', hint: 'Textual — faster/cheaper' },
+  { id: 'h/deep-search-pro', hint: 'Research — cited multi-source answer' },
+]
 const COMPOSIO_ACTIONS = ['slack_message', 'drive_upload', 'sheets_append']
 
 const TEMPLATE_VARS =
@@ -74,7 +83,7 @@ const newStepId = () => `s_${Date.now().toString(36)}${(stepSeq++).toString(36)}
 function defaultConfig(type: StepType): Record<string, unknown> {
   switch (type) {
     case 'h_agent':
-      return { task: 'google_form', url: '', instructions: '' }
+      return { agent: 'h/web-surfer-flash', task: 'google_form', url: '', instructions: '' }
     case 'composio':
       return { action: 'slack_message', channel: '', text: '' }
     case 'condition':
@@ -557,8 +566,37 @@ function StepConfig({
   const cfg = step.config as Record<string, string>
 
   if (step.type === 'h_agent') {
+    const agent = cfg.agent ?? 'h/web-surfer-flash'
+    const isPreset = H_AGENTS.some((a) => a.id === agent)
     return (
       <div className="flex flex-col gap-4">
+        <Field label="Agent" hint="Which H agent runs this step. Presets from the H console, or a custom one you built there.">
+          <Select
+            value={isPreset ? agent : '__custom__'}
+            onValueChange={(v) => onConfig('agent', v === '__custom__' ? '' : v)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {H_AGENTS.map((a) => (
+                <SelectItem key={a.id} value={a.id}>
+                  {a.id} — {a.hint}
+                </SelectItem>
+              ))}
+              <SelectItem value="__custom__">Custom agent…</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        {!isPreset && (
+          <Field label="Custom agent name" hint="Name of an agent you built at platform.hcompany.ai/agents">
+            <Input
+              value={agent}
+              onChange={(e) => onConfig('agent', e.target.value)}
+              placeholder="h/my-incident-filer"
+            />
+          </Field>
+        )}
         <Field label="Task kind">
           <Select value={cfg.task ?? 'google_form'} onValueChange={(v) => onConfig('task', v)}>
             <SelectTrigger>
