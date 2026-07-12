@@ -153,4 +153,93 @@ WORKFLOWS = [
             },
         ],
     },
+    # --- Shopper picks up merchandise → agent files restock ------------------
+    # Fires on the open-ended `person_interaction` event the perception model
+    # surfaces in discovery mode when someone takes an item off a shelf. This is
+    # the "upload a video in Testing → agent actually runs" demo path: no need to
+    # pre-select a targeted event slug, discovery-mode detection routes straight
+    # to the H agent.
+    {
+        "id": "wf_shopper_interaction",
+        "name": "Shopper handles merchandise → restock (H agent)",
+        "enabled": True,
+        "trigger": {
+            "event_type": "person_interaction",
+            "min_confidence": 0.5,
+            "cooldown_sec": 30,
+        },
+        "steps": [
+            {
+                "id": "s1",
+                "type": "h_agent",
+                "config": {
+                    "agent": "h/web-surfer-flash",
+                    "task": "custom_url",
+                    # Real, always-up HTML form standing in for a store restock
+                    # portal so the demo never depends on a private URL.
+                    "url": "https://httpbin.org/forms/post",
+                    "timeout_sec": 150,
+                    "instructions": (
+                        "You are logging a store restock request after a shopper "
+                        "handled merchandise. On this form, set Customer name to "
+                        "'Snowglobe Restock Bot', and in the 'Comments' box type "
+                        "exactly: 'RESTOCK CHECK — {{event.payload.detail}} in "
+                        "{{event.location}} (confidence {{event.confidence}})'. "
+                        "Then click Submit order. Report back the JSON the server "
+                        "echoes, confirming the comments field contains the "
+                        "message. Work quickly; do not fill optional fields."
+                    ),
+                },
+            },
+            {
+                "id": "s2",
+                "type": "composio",
+                "config": {
+                    "action": "slack_message",
+                    "channel": "#store-ops",
+                    "text": "Shopper interaction in {{event.location}}: "
+                            "{{event.payload.detail}} (confidence "
+                            "{{event.confidence}}). Agent logged a restock check. "
+                            "Agent report: {{steps.s1.answer}}",
+                },
+            },
+        ],
+    },
+    # --- Voice alert (Gradium TTS) → modular delivery -------------------------
+    # Speech is a primitive: s1 synthesizes a spoken alert (and plays it aloud
+    # on the demo box); s2 delivers the resulting audio_url wherever we want —
+    # here Slack, but it could be Drive, email, or an MCP tool. The delivery is
+    # chosen per use-case, not baked into the voice step.
+    {
+        "id": "wf_spill_voice",
+        "name": "Spill → spoken alert (Gradium) + Slack",
+        "enabled": True,
+        "trigger": {
+            "event_type": "spill",
+            "min_confidence": 0.7,
+            "cooldown_sec": 300,
+        },
+        "steps": [
+            {
+                "id": "s1",
+                "type": "voice",
+                "config": {
+                    "text": "Attention: a spill was detected in "
+                            "{{event.location}}. Please dispatch cleanup.",
+                    "play_local": True,
+                },
+            },
+            {
+                "id": "s2",
+                "type": "composio",
+                "config": {
+                    "action": "slack_message",
+                    "channel": "#facilities-alerts",
+                    "text": "Spoken spill alert for {{event.location}} "
+                            "(confidence {{event.confidence}}). "
+                            "Audio: {{steps.s1.audio_url}}",
+                },
+            },
+        ],
+    },
 ]

@@ -6,3 +6,6 @@ python-dotenv>=1.0
 # Composio SDK for real Slack/Sheets/Drive actions (needs COMPOSIO_API_KEY
 # with tool-execution rights + linked accounts — see NOTES.md).
 composio>=0.17
+# Gradium TTS for the voice step (needs GRADIUM_API_KEY — see NOTES.md).
+# Optional: the voice step imports it lazily and stubs without the key.
+gradium>=0.6

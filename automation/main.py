@@ -30,6 +30,7 @@ except Exception:
 import jsonschema
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 import engine
 import composio_status
@@ -38,6 +39,13 @@ import scheduler
 import seeds
 import storage
 from shared.event_normalization import normalize_event
+
+# Where the voice step writes synthesized clips; served below at /audio/{name}
+# so the dashboard and downstream steps get a reachable audio_url. Kept in sync
+# with steps/voice.py's default via the same VOICE_AUDIO_DIR env var.
+_AUDIO_DIR = os.environ.get(
+    "VOICE_AUDIO_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "audio")
+)
 
 _SHARED = os.path.join(os.path.dirname(__file__), "..", "shared")
 with open(os.path.join(_SHARED, "event_schema.json")) as f:
@@ -212,6 +220,20 @@ async def get_run(run_id: str):
 @app.get("/health")
 async def health():
     return {"ok": True}
+
+
+# --- audio (synthesized voice clips) ----------------------------------------
+
+@app.get("/audio/{name}")
+async def get_audio(name: str):
+    """Serve a voice-step clip written to VOICE_AUDIO_DIR. Flat filenames only
+    (no path traversal); the voice step names them voice_<hex>.<ext>."""
+    if "/" in name or "\\" in name or name.startswith("."):
+        raise HTTPException(400, detail="bad name")
+    path = os.path.join(_AUDIO_DIR, name)
+    if not os.path.isfile(path):
+        raise HTTPException(404)
+    return FileResponse(path)
 
 
 @app.get("/status")

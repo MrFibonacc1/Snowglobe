@@ -1,18 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AppEvent, EventType } from '../types'
+import type { AppEvent, EventType, Run } from '../types'
 import type { Store } from '../store'
 import { SUGGESTED_EVENT_TYPES, eventMeta } from '../constants'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
-import { PillToggle } from './Cameras'
 import { ManualEvents } from './ManualEvents'
 import { ConfidenceBar, EventIcon } from '../components/ui-kit'
-import { Upload, Check, Loader2, ShieldCheck, ShieldAlert } from 'lucide-react'
+import { Upload, Check, Loader2, ShieldCheck, ShieldAlert, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api, cameraSnapshotUrl } from '../api'
 
@@ -156,7 +154,7 @@ export function Testing({ store }: { store: Store }) {
   const initialDraft = useMemo(() => loadTestingSessionDraft(), [])
   const [preview, setPreview] = useState<string | null>(null)
   const [videoDuration, setVideoDuration] = useState<number | null>(null)
-  const [discover, setDiscover] = useState<boolean>(initialDraft.discover)
+  const [discover] = useState<boolean>(initialDraft.discover)
   const [selected, setSelected] = useState<EventType[]>(initialDraft.selected)
   const [customType, setCustomType] = useState(initialDraft.customType)
   const [zone, setZone] = useState(initialDraft.zone)
@@ -183,6 +181,10 @@ export function Testing({ store }: { store: Store }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  // Run IDs the most recent upload kicked off in the automation engine. The
+  // Testing tab uses these to show the agent working live (status + the H
+  // Company agent_view_url) without leaving this page for the Runs tab.
+  const [agentRunIds, setAgentRunIds] = useState<string[]>([])
   const file = store.testingFile
   const liveCameras = useMemo(
     () =>
@@ -608,6 +610,7 @@ export function Testing({ store }: { store: Store }) {
     let runError: string | null = null
     store.setTestingError(null)
     store.setTestingResult(null)
+    setAgentRunIds([])
 
     try {
       const fd = new FormData()
@@ -662,6 +665,10 @@ export function Testing({ store }: { store: Store }) {
           await Promise.all(posts)
           if (postError) runError = postError
           if (postError) store.setTestingError(postError)
+          // Surface the agent working live in this tab. The H agent runs far
+          // longer than waitForRunCompletion's window, so hand the run IDs to
+          // the AgentActivity panel, which polls them to completion on its own.
+          if (runIds.length) setAgentRunIds([...runIds])
           await Promise.all([waitForRunCompletion(runIds), refreshRuns()])
         }
       }
@@ -695,7 +702,6 @@ export function Testing({ store }: { store: Store }) {
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <ManualEvents store={store} />
       {/* Left: upload + controls */}
       <Card>
         <CardContent className="flex flex-col gap-4">
@@ -870,73 +876,6 @@ export function Testing({ store }: { store: Store }) {
             >
               {browserStream ? 'Stop camera' : 'Use my camera'}
             </Button>
-            <p className="text-xs text-muted-foreground">
-              Uses your browser's camera permission (getUserMedia) — this works from any device,
-              not just this machine. Toggle Live to analyze back-to-back once it's on.
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex flex-col">
-                <Label>Discovery mode</Label>
-                <span className="text-xs text-muted-foreground">
-                  Let the model surface and name any actionable event itself.
-                </span>
-              </div>
-              <Switch checked={discover} onCheckedChange={setDiscover} aria-label="Discovery mode" />
-            </div>
-
-            {!discover && (
-              <div className="flex flex-col gap-2">
-                <Label>Watch for specific events</Label>
-                <div className="flex flex-wrap gap-1.5">
-                  {[...new Set([...SUGGESTED_EVENT_TYPES, ...selected])].map((t) => (
-                    <PillToggle
-                      key={t}
-                      selected={selected.includes(t)}
-                      onClick={() => toggleEvent(t)}
-                    >
-                      <EventIcon type={t} className="size-3.5" /> {eventMeta(t).label}
-                    </PillToggle>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <Input
-                    value={customType}
-                    onChange={(e) => setCustomType(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        addCustom()
-                      }
-                    }}
-                    placeholder="add a custom event, e.g. blocked_exit"
-                  />
-                  <Button type="button" variant="secondary" onClick={addCustom}>
-                    Add
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex flex-col gap-2">
-              <Label>Zone</Label>
-              <Input value={zone} onChange={(e) => setZone(e.target.value)} placeholder="zone_a" />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label>Min confidence, {Math.round(minConf * 100)}%</Label>
-              <Slider
-                min={0}
-                max={1}
-                step={0.05}
-                value={[minConf]}
-                onValueChange={([v]) => setMinConf(v)}
-                className="mt-2.5"
-              />
-            </div>
           </div>
 
           {isVideo && (
@@ -1089,10 +1028,169 @@ export function Testing({ store }: { store: Store }) {
                   <EventsBlock events={result.events ?? []} />
             </div>
           )}
+
+              {agentRunIds.length > 0 && <AgentActivity runIds={agentRunIds} />}
             </>
           )}
         </CardContent>
       </Card>
+
+      {/* Bottom: manual event sender (full width) */}
+      <ManualEvents store={store} />
+    </div>
+  )
+}
+
+// Watch the automation runs the current upload started — live, without leaving
+// the Testing tab. Polls each run to completion (the H agent can take a couple
+// minutes, well past the run() flow's short wait) and, for any h_agent step,
+// surfaces the H Company agent_view_url both as a link and an embedded iframe
+// so you literally see the agent's browser working.
+function AgentActivity({ runIds }: { runIds: string[] }) {
+  const [runs, setRuns] = useState<Run[]>([])
+
+  useEffect(() => {
+    if (!runIds.length || !api.configured()) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const startedAt = Date.now()
+    // Cap polling at ~4 min: longer than a typical hosted agent session, short
+    // enough that a stuck run doesn't poll forever.
+    const maxMs = 240_000
+
+    const tick = async () => {
+      try {
+        const fetched = await Promise.all(
+          runIds.map((id) => api.getRun(id).catch(() => null)),
+        )
+        const next = fetched.filter((r): r is Run => !!r)
+        if (!cancelled) setRuns(next)
+        const allDone =
+          next.length === runIds.length &&
+          next.every((r) => r.status !== 'running')
+        if (!cancelled && !allDone && Date.now() - startedAt < maxMs) {
+          timer = setTimeout(tick, 2500)
+        }
+      } catch {
+        if (!cancelled && Date.now() - startedAt < maxMs) {
+          timer = setTimeout(tick, 3500)
+        }
+      }
+    }
+    tick()
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [runIds])
+
+  if (!runs.length) {
+    return (
+      <div className="mt-5 flex items-center gap-2 rounded-lg border border-border/60 p-3 text-sm text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" /> Starting agent…
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-5 flex flex-col gap-3">
+      <div className="text-sm font-semibold">Agent activity</div>
+      {runs.map((run) => (
+        <AgentRunCard key={run.id} run={run} />
+      ))}
+    </div>
+  )
+}
+
+function AgentRunCard({ run }: { run: Run }) {
+  const viewUrl = run.steps
+    .map((s) => (s.output?.agent_view_url as string) || (s.output?.replay_url as string))
+    .find((u): u is string => !!u)
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-border/60 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-medium">
+          {run.workflow_name ?? run.workflow_id}
+        </div>
+        <Badge
+          variant="outline"
+          className={cn(
+            'capitalize',
+            run.status === 'running' && 'border-primary/40 text-primary',
+            run.status === 'done' && 'border-emerald-500/40 text-emerald-500',
+            run.status === 'failed' && 'border-destructive/40 text-destructive',
+          )}
+        >
+          {run.status}
+        </Badge>
+      </div>
+
+      {/* Per-step progress */}
+      <div className="flex flex-col gap-1.5">
+        {run.steps.map((step) => (
+          <div key={step.id} className="flex items-start gap-2 text-xs">
+            <span className="mt-0.5">
+              {step.status === 'running' ? (
+                <Loader2 className="size-3.5 animate-spin text-primary" />
+              ) : step.status === 'done' ? (
+                <Check className="size-3.5 text-emerald-500" />
+              ) : step.status === 'failed' ? (
+                <span className="inline-block size-2 rounded-full bg-destructive" />
+              ) : step.status === 'skipped' ? (
+                <span className="inline-block size-2 rounded-full bg-muted-foreground/40" />
+              ) : (
+                <span className="inline-block size-2 rounded-full bg-muted-foreground/60" />
+              )}
+            </span>
+            <div className="min-w-0 flex-1">
+              <span className="font-medium">{step.type}</span>
+              <span className="text-muted-foreground">
+                {step.status === 'pending' && ' · waiting'}
+                {step.status === 'running' && ' · working…'}
+                {step.status === 'skipped' && ' · skipped'}
+                {step.status === 'failed' && ' · failed'}
+              </span>
+              {step.output?.error ? (
+                <div className="text-destructive">{String(step.output.error)}</div>
+              ) : step.output?.answer ? (
+                <div className="text-muted-foreground">{String(step.output.answer)}</div>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Live agent view. H Company's session page sends X-Frame-Options: DENY
+          / frame-ancestors 'none', so it can't be embedded in an iframe — we
+          open it in a new tab. This is the "watch the agent work" money-shot. */}
+      {viewUrl ? (
+        <a
+          href={viewUrl}
+          target="_blank"
+          rel="noreferrer"
+          className={cn(
+            'inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors',
+            run.status === 'running'
+              ? 'border-primary/50 bg-primary/10 text-primary hover:bg-primary/15'
+              : 'border-border/60 text-foreground hover:bg-muted/60',
+          )}
+        >
+          {run.status === 'running' ? (
+            <>
+              <Loader2 className="size-4 animate-spin" /> Watch the agent live
+            </>
+          ) : (
+            <>
+              <ExternalLink className="size-4" /> View agent session replay
+            </>
+          )}
+        </a>
+      ) : run.status === 'running' ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" /> Spinning up the agent's browser…
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -215,7 +215,25 @@ function StepDetail({ step }: { step: RunStep }) {
     )
   }
   if (step.type === 'voice') {
-    return <div className="text-xs text-muted-foreground">{out.text ? String(out.text) : 'voice'}</div>
+    const audioUrl = out.audio_url as string | undefined
+    const stub = out.stubbed ? (out.unavailable ? ' (unavailable)' : ' (stubbed)') : ''
+    return (
+      <div className="flex flex-col gap-1.5">
+        <div className="text-xs text-muted-foreground">
+          <span className="opacity-70">spoke · </span>
+          {out.text ? String(out.text) : 'voice'}
+          {stub}
+          {out.played ? <span className="opacity-70"> · played aloud</span> : ''}
+        </div>
+        {audioUrl && (
+          <audio controls preload="none" src={audioUrl} className="h-8 w-full max-w-xs">
+            <a href={audioUrl} target="_blank" rel="noreferrer">
+              Play spoken alert
+            </a>
+          </audio>
+        )}
+      </div>
+    )
   }
   if (step.type === 'mcp') {
     return (

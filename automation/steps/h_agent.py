@@ -85,10 +85,10 @@ def _require_terminal_answer(output: dict, running_states: set[str]) -> dict:
     return output
 
 
-def execute(config: dict, event: dict) -> dict:
+def execute(config: dict, event: dict, progress=None) -> dict:
     mode = os.environ.get("H_AGENT_MODE", MODE)
     if mode == "agent_api":
-        return _run_agent_api(config)
+        return _run_agent_api(config, progress=progress)
     if mode == "agent_mcp":
         return _run_agent_mcp(config)
     if mode == "nemoclaw":
@@ -99,7 +99,7 @@ def execute(config: dict, event: dict) -> dict:
     return _mock(config)
 
 
-def _run_agent_api(config: dict) -> dict:
+def _run_agent_api(config: dict, progress=None) -> dict:
     api_key = os.environ.get("HAI_API_KEY")
     if not api_key:
         raise RuntimeError("H_AGENT_MODE=agent_api but HAI_API_KEY is not set")
@@ -131,6 +131,28 @@ def _run_agent_api(config: dict) -> dict:
         session_id = session["id"]
         view_url = session.get("agent_view_url")
 
+        def _emit(extra: dict) -> None:
+            if not progress:
+                return
+            try:
+                progress({
+                    "backend": "agent_api",
+                    "agent": agent,
+                    "session_id": session_id,
+                    "status": "running",
+                    "task": config.get("task"),
+                    "url": url,
+                    **extra,
+                })
+            except Exception:  # noqa: BLE001 — progress is best-effort
+                pass
+
+        # Announce the session immediately; the live view URL often isn't in the
+        # POST /sessions response, so we also publish it from the poll loop below
+        # the moment H exposes it.
+        _emit({"agent_view_url": view_url} if view_url else {})
+        published_view = bool(view_url)
+
         # Poll until the session finishes or we hit our time budget.
         last = session
         while time.time() - started < budget:
@@ -138,6 +160,15 @@ def _run_agent_api(config: dict) -> dict:
             r = client.get(f"/sessions/{session_id}")
             r.raise_for_status()
             last = r.json()
+            # Surface the live view URL as soon as it appears, so the dashboard
+            # can link out to watch the agent's browser while it's still working
+            # (H blocks iframe embedding, so the UI opens it in a new tab).
+            if not published_view:
+                vu = last.get("agent_view_url")
+                if vu:
+                    view_url = vu
+                    published_view = True
+                    _emit({"agent_view_url": vu})
             status = (last.get("status") or {}).get("status")
             if last.get("finished_at") or (status and status not in _RUNNING):
                 break
@@ -151,6 +182,11 @@ def _run_agent_api(config: dict) -> dict:
             final = client.get(f"/sessions/{session_id}")
             final.raise_for_status()
             last = final.json()
+
+    # Belt-and-suspenders: if we never captured the live view URL during
+    # polling, take it from the final snapshot so the run still links out.
+    if not view_url:
+        view_url = last.get("agent_view_url")
 
     st = last.get("status") or {}
     return _require_terminal_answer({

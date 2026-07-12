@@ -111,9 +111,20 @@ async def execute_run(run: dict, workflow: dict, event: dict) -> None:
             s["id"]: s.get("output", {}) for s in run["steps"] if s.get("output")
         }
         config = render(step_def.get("config", {}), event, steps_ctx)
+
+        # Let long-running steps publish partial output mid-flight (e.g. the H
+        # agent's live view URL) so the dashboard can show it working before the
+        # step returns. Runs in the worker thread; only mutates the run dict and
+        # writes storage (both sync + thread-safe here), never the event loop.
+        def _progress(partial: dict, _step=step, _run=run) -> None:
+            merged = dict(_step.get("output") or {})
+            merged.update(partial or {})
+            _step["output"] = merged
+            storage.update_run(_run)
+
         try:
             output = await asyncio.to_thread(
-                execute_step, step_def["type"], config, event
+                execute_step, step_def["type"], config, event, _progress
             )
             step["output"] = output
             # A condition step that doesn't pass ends the run quietly.

@@ -168,6 +168,59 @@ server (hosted ones exist, e.g. Composio's per-toolkit MCP URLs, or run a
 community Google MCP server; either way the tool names come from that
 server's `tools/list`). Check the exact tool names/args before the demo.
 
+## Voice (`steps/voice.py`) — Gradium TTS, modular delivery
+
+Gradium is a **TTS/STT engine, not a telephony provider** — it turns text into
+audio bytes; it does not dial phones. So the `voice` step is a *speech
+primitive*: it synthesizes `text` to a `.wav` and returns a servable
+`audio_url`. **Delivery is composable** — a following `composio`/`mcp` step
+ships that URL wherever the use-case wants (Slack, Drive, email), and the
+optional `play_local` plays the alert out loud on the demo machine.
+
+```bash
+pip install -r requirements.txt        # gradium
+export GRADIUM_API_KEY=...             # from Gradium Studio (gradium.ai)
+# optional: export GRADIUM_VOICE_ID=<voice_id from the voice library>
+```
+
+Config:
+
+```json
+{ "type": "voice", "config": {
+    "text": "Spill detected in {{event.location}}",
+    "voice_id": "YTpq7expH9539ERJ",   // optional; else GRADIUM_VOICE_ID / default
+    "play_local": true,                // optional; afplay/ffplay/aplay on this box
+    "format": "wav"                    // optional; wav is browser-friendly
+} }
+```
+
+The step:
+1. Renders `text` via Gradium's buffered `client.tts()` (SDK is async; the
+   engine runs executors in a thread, so `asyncio.run` is used internally).
+2. Writes the clip to `VOICE_AUDIO_DIR` (default `automation/audio/`), which the
+   service serves at `GET /audio/{name}`.
+3. Returns `{audio_url, audio_path, text, voice_id, played}`. The dashboard's
+   Runs view renders an inline `<audio>` player from `audio_url`.
+
+Without `GRADIUM_API_KEY` the step logs the text and returns `{"stubbed": true}`
+so runs still complete. A synthesis error degrades to `{stubbed, unavailable,
+reason}` (mirrors composio) rather than failing an otherwise-good run.
+
+Modular delivery example (voice → Slack), using `{{steps.<id>.audio_url}}`:
+
+```json
+"steps": [
+  { "id": "s1", "type": "voice",
+    "config": { "text": "Spill in {{event.location}}", "play_local": true } },
+  { "id": "s2", "type": "composio",
+    "config": { "action": "slack_message", "channel": "#facilities-alerts",
+                "text": "Spoken alert: {{steps.s1.audio_url}}" } }
+]
+```
+
+`PUBLIC_BASE_URL` must be the automation service's externally reachable base
+and match the run port, or `audio_url` won't resolve for the dashboard.
+
 ## Env summary
 
 | Var | Needed for |
@@ -179,5 +232,7 @@ server's `tools/list`). Check the exact tool names/args before the demo.
 | `H_AGENT_TIMEOUT_SEC`, `H_AGENT_POLL_SEC` | real-agent completion budget (default 300s) and polling interval; steps may override with `timeout_sec` |
 | `SURFER_H_CLI_DIR`, `SURFER_H_BIN`, `HAI_MODEL_URL`, `HAI_MODEL_NAME` | legacy surfer_cli |
 | `COMPOSIO_API_KEY`, `COMPOSIO_USER_ID` | real Composio actions |
-| `GRADIUM_API_KEY`, `GRADIUM_VOICE_ID`, `VOICE_OUTPUT_DIR` | confirmed Gradium TTS audio generation |
+| `GRADIUM_API_KEY` | voice step TTS (fail-closed: raises if missing) |
+| `GRADIUM_VOICE_ID` | voice default (else library default) |
+| `VOICE_AUDIO_DIR` (alias `VOICE_OUTPUT_DIR`), `PUBLIC_BASE_URL` | where clips are written + served from |
 | `AUTOMATION_DB` | SQLite path override (default `automation/data.db`) |
