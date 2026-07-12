@@ -3,7 +3,7 @@
 ## Verified demo clips (01-05)
 
 Five curated demo clips, each chosen because the perception pipeline produces a
-**notable, verified detection** on it with the real NVIDIA VLM
+notable, verified detection on it with the real NVIDIA VLM
 (`nvidia/nemotron-nano-12b-v2-vl`). Two of them drive the seeded automation
 workflows all the way through their steps (not just a skipped condition).
 
@@ -55,11 +55,11 @@ From the repo root, with `perception/.env` configured (`NVIDIA_API_KEY`,
 ```bash
 source perception/.venv/bin/activate
 
-# The notable one — spill triggers the full incident workflow:
+# The notable one, spill triggers the full incident workflow:
 python -m perception --source sample_data/01_spill_floor.mp4 --zone aisle_5 \
   --events spill,person_count,safety_violation --fps 1 --limit 12
 
-# The crowd one — trips the over-capacity condition:
+# The crowd one, trips the over-capacity condition:
 python -m perception --source sample_data/02_crowd_over_capacity.mp4 --zone entrance \
   --events person_count,foot_traffic --fps 1 --limit 10
 
@@ -69,15 +69,15 @@ python -m perception --source sample_data/06_warehouse_corner_cctv.mp4 \
   --fps 1 --limit 30
 ```
 
-Add `--mock` to run without an API key (deterministic fake verdicts), or
+Add `--mock` to run without an API key (deterministic stub verdicts), or
 `--dump out.jsonl` to write events to a file instead of POSTing to `automation/`.
 
 ## Notes
 
 - Counts on dense crowds (clip 02) are rough VLM estimates, not detection-based
-  tracking — directionally correct and more than enough to exercise the
+  tracking, directionally correct and more than enough to exercise the
   `count > 20` occupancy rule.
-- These clips are for **testing/demo** of the zero-shot perception pipeline;
+- These clips are for testing/demo of the zero-shot perception pipeline;
   the system does no training, so no labels are included.
 - Clips 01-05: Mixkit free stock video (no attribution required).
 
@@ -85,45 +85,45 @@ Add `--mock` to run without an API key (deterministic fake verdicts), or
 
 Retrieved 2026-07-11. Keep these attributions with any redistributed copies.
 
-- **06 — NVIDIA Physical AI Smart Spaces.** Original file:
+- **06: NVIDIA Physical AI Smart Spaces.** Original file:
   [`MTMC_Tracking_2026/test/Warehouse_026/videos/Camera_0000.mp4`](https://huggingface.co/datasets/nvidia/PhysicalAI-SmartSpaces/blob/main/MTMC_Tracking_2026/test/Warehouse_026/videos/Camera_0000.mp4).
   The [dataset card](https://huggingface.co/datasets/nvidia/PhysicalAI-SmartSpaces)
   identifies `Warehouse_026` as a real-world warehouse capture and licenses the
   dataset under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
-- **07-09 — EC-funded CAVIAR project, IST 2001-37540.** The
+- **07-09: EC-funded CAVIAR project, IST 2001-37540.** The
   [official dataset page](https://groups.inf.ed.ac.uk/vision/DATASETS/CAVIAR/CAVIARDATA1/)
   describes the Lisbon shopping-centre cameras and marks the data **CC BY-SA**
   (the source does not specify a license version). Original files:
   [07 corridor](https://groups.inf.ed.ac.uk/vision/DATASETS/CAVIAR/CAVIARDATA2/EnterExitCrossingPaths1cor/EnterExitCrossingPaths1cor.mpg),
   [08 front](https://groups.inf.ed.ac.uk/vision/DATASETS/CAVIAR/CAVIARDATA2/EnterExitCrossingPaths1front/EnterExitCrossingPaths1front.mpg), and
   [09 corridor](https://groups.inf.ed.ac.uk/vision/DATASETS/CAVIAR/CAVIARDATA2/ShopAssistant1cor/ShopAssistant1cor.mpg).
-- **10 — First National Bank (Mayfield, Kentucky).** The
+- **10: First National Bank (Mayfield, Kentucky).** The
   [Wikimedia Commons file page](https://commons.wikimedia.org/wiki/File:First_National_Bank_Mayfield_CCTV.webm)
   classifies the fixed-camera recording as public domain under its automated
   CCTV rationale and notes that treatment can vary by jurisdiction.
-- **11 — `domdomegg`.** [Amazon warehouse BHX4 loading docks 2](https://commons.wikimedia.org/wiki/File:Amazon_warehouse_BHX4_loading_docks_2.webm),
+- **11: `domdomegg`.** [Amazon warehouse BHX4 loading docks 2](https://commons.wikimedia.org/wiki/File:Amazon_warehouse_BHX4_loading_docks_2.webm),
   licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The local
   MP4 is a video-only H.264 transcode; the unchanged WebM is in
   `source_originals/`.
 
-- **12 — 7-Eleven (Sanford, Florida).** [Trayvon Martin 7-Eleven CCTV footage.webm](https://commons.wikimedia.org/wiki/File:Trayvon_Martin_7-Eleven_CCTV_footage.webm)
+- **12: 7-Eleven (Sanford, Florida).** [Trayvon Martin 7-Eleven CCTV footage.webm](https://commons.wikimedia.org/wiki/File:Trayvon_Martin_7-Eleven_CCTV_footage.webm)
   is public-domain automated CCTV from Wikimedia Commons.
 
-- **13 — USDA Grocery Store Footage.** [Supermarket Grocery Products (13083756734).webm](https://commons.wikimedia.org/wiki/File:Supermarket_Grocery_Products_%2813083756734%29.webm)
+- **13: USDA Grocery Store Footage.** [Supermarket Grocery Products (13083756734).webm](https://commons.wikimedia.org/wiki/File:Supermarket_Grocery_Products_%2813083756734%29.webm)
   is U.S. federal government source content and is public-domain on Wikimedia.
 
-- **14/15 — Additional CAVIAR shopping scenes.** Front-view sequences from the CAVIAR shopping-center store scenarios:
-  [14 — OneStopEnter1front.mpg](https://homepages.inf.ed.ac.uk/rbf/CAVIARDATA2/OneStopEnter1front/OneStopEnter1front.mpg)
-  and [15 — OneStopMoveNoEnter1front.mpg](https://homepages.inf.ed.ac.uk/rbf/CAVIARDATA2/OneStopMoveNoEnter1front/OneStopMoveNoEnter1front.mpg),
+- **14/15: Additional CAVIAR shopping scenes.** Front-view sequences from the CAVIAR shopping-center store scenarios:
+  [14: OneStopEnter1front.mpg](https://homepages.inf.ed.ac.uk/rbf/CAVIARDATA2/OneStopEnter1front/OneStopEnter1front.mpg)
+  and [15: OneStopMoveNoEnter1front.mpg](https://homepages.inf.ed.ac.uk/rbf/CAVIARDATA2/OneStopMoveNoEnter1front/OneStopMoveNoEnter1front.mpg),
   reused under CAVIAR dataset usage terms.
 
-- **16-18 — Voxel51 RetailAction (Hugging Face).** Shelf interaction subset from
+- **16-18: Voxel51 RetailAction (Hugging Face).** Shelf interaction subset from
   [`Voxel51/RetailAction`](https://huggingface.co/datasets/Voxel51/RetailAction), which includes
   explicit take/put/touch actions. Original clips downloaded as
   `source_originals/rank0_video.mp4`, `source_originals/rank0_video-3.mp4`, and
   `source_originals/rank0_video-10.mp4`.
 
-- **19-20 — Voxel51 MERL Shopping Dataset (Hugging Face).** Shelf-interaction retail
+- **19-20: Voxel51 MERL Shopping Dataset (Hugging Face).** Shelf-interaction retail
   sequences from
   [`Voxel51/MERL_Shopping_Dataset`](https://huggingface.co/datasets/Voxel51/MERL_Shopping_Dataset)
   with labels like `Hand in Shelf`, `Reach to Shelf`, and `Inspect Product`. Original clips

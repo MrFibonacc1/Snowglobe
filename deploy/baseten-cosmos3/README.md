@@ -3,7 +3,7 @@
 Deploy NVIDIA's Cosmos physical-AI reasoner (the downloadable `cosmos-reason1-7b`
 NIM) as a self-hosted, autoscaling endpoint on Baseten, then point the perception
 service at it. This replaces the hosted `nemotron-nano-12b-v2-vl` fallback with a
-real Cosmos reasoner running on your own GPU.
+Cosmos reasoner running on your own GPU.
 
 > Why this NIM: Cosmos reasoner (`cosmos-reason2-8b`) on build.nvidia.com is a
 > hosted-only / deprecated endpoint that 404s for our account. The **downloadable**
@@ -18,8 +18,8 @@ real Cosmos reasoner running on your own GPU.
 | `test_client.py` | One-shot smoke test: send an image, print the model's answer. |
 | `README.md` | This file. |
 
-The perception service already supports a remote endpoint — no code change needed
-on your side beyond filling in `perception/.env` (see step 5).
+The perception service already supports a remote endpoint, so no code change is
+needed on your side beyond filling in `perception/.env` (see step 5).
 
 ---
 
@@ -45,14 +45,14 @@ at boot, so Baseten needs the key in two forms.
 
 In the Baseten dashboard → **Secrets**, add:
 
-- **`DOCKER_REGISTRY_nvcr.io`** — lets Baseten pull the image. Value is the
+- **`DOCKER_REGISTRY_nvcr.io`**: lets Baseten pull the image. Value is the
   base64 of `$oauthtoken:<your NGC key>`:
   ```bash
   echo -n '$oauthtoken:<YOUR_NGC_API_KEY>' | base64
   ```
-  (`$oauthtoken` is a literal string, not a variable — keep it exactly.)
+  (`$oauthtoken` is a literal string, not a variable. Keep it exactly.)
 
-- **`ngc_api_key`** — the raw NGC key (no base64), used at runtime to download
+- **`ngc_api_key`**: the raw NGC key (no base64), used at runtime to download
   the model weights. Value is just `<YOUR_NGC_API_KEY>`.
 
 ### 3. Log in the CLI
@@ -84,7 +84,7 @@ VLM_AUTH_SCHEME=api-key
 VLM_BASE_URL=https://model-<id>.api.baseten.co/environments/production/sync/v1
 VLM_MODEL=nvidia/cosmos-reason1-7b
 ```
-Note the trailing `/v1` — the NIM serves OpenAI routes under it, so perception hits
+Note the trailing `/v1`. The NIM serves OpenAI routes under it, so perception hits
 `.../sync/v1/chat/completions`.
 
 ### 6. Verify
@@ -103,13 +103,13 @@ A `HTTP 200` with a sensible description means Cosmos is live end-to-end.
 ## Cost / tuning notes
 
 - **H100** is the default (`resources.accelerator`). It gives the optimized
-  TRT-LLM throughput profile. To cut cost, switch to `A100` — it still meets the
-  ≥48 GB VRAM floor but runs the slower latency profile. Do **not** go below a
+  TRT-LLM throughput profile. To cut cost, switch to `A100`; it still meets the
+  ≥48 GB VRAM floor but runs the slower latency profile. Do not go below a
   48 GB single-GPU card.
 - Baseten **scales to zero** when idle; the trade-off is a cold start on the next
   request. Set a min replica > 0 in the dashboard if you need consistently low
   latency for a demo.
-- Bump the image tag in `config.yaml` as NVIDIA ships newer NIMs — check
+- Bump the image tag in `config.yaml` as NVIDIA ships newer NIMs. Check
   https://catalog.ngc.nvidia.com/orgs/nim/nvidia/containers/cosmos-reason1-7b
 
 ## Rolling back to the hosted model

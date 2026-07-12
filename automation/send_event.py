@@ -1,12 +1,12 @@
-"""Post a schema-valid fake event — lets automation + dashboard develop
+"""Post a schema-valid event so automation and the dashboard can develop
 without perception.
 
 Event types are open-ended (any snake_case slug the perception model might
 surface), so `event_type` here is free-form:
 
-  python send_fake_event.py spill --zone zone_b
-  python send_fake_event.py person_count --zone zone_a --count 25
-  python send_fake_event.py blocked_exit --zone zone_c --detail "Pallet in front of exit"
+  python send_event.py spill --zone zone_b
+  python send_event.py person_count --zone zone_a --count 25
+  python send_event.py blocked_exit --zone zone_c --detail "Pallet in front of exit"
 """
 
 import argparse

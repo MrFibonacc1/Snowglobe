@@ -33,9 +33,9 @@ for the full architecture.
 
 ## Why go2rtc
 
-One gateway speaks every protocol a shop camera might use — RTSP/ONVIF
+One gateway speaks every protocol a shop camera might use: RTSP/ONVIF
 (Hikvision, Dahua, Amcrest, Reolink, NVR kits) plus vendor-native bridges for
-Wyze, Nest, Ring, TP-Link — and re-streams them all as plain RTSP. Perception
+Wyze, Nest, Ring, TP-Link. It re-streams them all as plain RTSP, so perception
 never has to learn a vendor SDK.
 
 ## Pinning cameras
@@ -48,4 +48,4 @@ pin cameras across restarts, add them under `streams:` in `go2rtc.yaml`.
 - `network_mode: host` is required for ONVIF WS-Discovery and to reach cameras
   on the local subnet.
 - The gateway needs outbound internet only for the hosted Cosmos/NIM calls and
-  to POST events — no inbound ports.
+  to POST events, with no inbound ports.

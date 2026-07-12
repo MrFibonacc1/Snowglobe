@@ -77,7 +77,7 @@
 - Modify: `README.md`
 
 **Interfaces:**
-- Consumes: UI components and step adapters with local fake clients/servers.
+- Consumes: UI components and step adapters with local stub clients/servers.
 - Produces: regression coverage for camera rendering/connection UI, workflow inventory configuration, MCP protocol success/error, NemoClaw terminal contracts, and persisted voice artifacts.
 
 - [x] **Step 1: Add failing UI tests for camera empty/connected states and inventory workflow creation.**

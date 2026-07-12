@@ -1,13 +1,12 @@
-# Snowglobe — Project Plan (v2, 3-person split)
+# Snowglobe: Project Plan (v2, 3-person split)
 
-**Ambient perception → agentic action.** Cameras watch a physical space.
-**NVIDIA Cosmos 3's Reasoner** (Super where we have the compute, Nano via the
-hosted NIM endpoint otherwise) turns frames into structured events — spills,
-occupancy, foot traffic, safety violations. Those events flow into our
-**own workflow builder**: users visually compose automations whose steps are
-**H Company agent** runs (fill a Google Form, create a ticket — orchestrated
-through **OpenClaw**) and **Composio** actions (Drive, Sheets, Slack). A live
-dashboard shows everything happening.
+Cameras watch a physical space. NVIDIA Cosmos 3's Reasoner (Super where we
+have the compute, Nano via the hosted NIM endpoint otherwise) turns frames
+into structured events: spills, occupancy, foot traffic, safety violations.
+Those events flow into our own workflow builder: users visually compose
+automations whose steps are H Company agent runs (fill a Google Form, create
+a ticket, orchestrated through OpenClaw) and Composio actions (Drive, Sheets,
+Slack). A live dashboard shows everything happening.
 
 Built at The Computer Use Hackathon (H Company / NVIDIA / Accel), Jul 11–12 2026, SF.
 
@@ -17,7 +16,7 @@ Built at The Computer Use Hackathon (H Company / NVIDIA / Accel), Jul 11–12 20
 |---|---|---|
 | Perception | **NVIDIA Cosmos 3 Reasoner** via NIM API (`cosmos3-nano-reasoner` hosted on build.nvidia.com; Super's 32B reasoner if we get datacenter GPU access; Nemotron VL as fallback) | Frames → detections (one prompt per event type) |
 | Events | Our JSON schema over HTTP | The contract between all parts |
-| Workflow engine | **Custom** — FastAPI backend | Trigger matching, step execution, run logs |
+| Workflow engine | **Custom**, FastAPI backend | Trigger matching, step execution, run logs |
 | Workflow builder UI | Our dashboard (React/Vite, built) | Visual editor: trigger + ordered action steps |
 | Agent orchestration | **OpenClaw** driving **H Company agents** (credits in hand) | UI work: Google Forms, ticket builders, portals |
 | Integrations | **Composio** | API work: Drive, Sheets, Slack |
@@ -46,7 +45,7 @@ Built at The Computer Use Hackathon (H Company / NVIDIA / Accel), Jul 11–12 20
  │  trigger matcher (event type + zone + confidence + cooldown/dedup)      │
  │        │ matched                                                        │
  │        ▼                                                                │
- │  WORKFLOW ENGINE — executes the workflow's steps in order,              │
+ │  WORKFLOW ENGINE runs the workflow's steps in order,                    │
  │  records a Run with per-step status                                     │
  │        │                                                                │
  │        ├─ h_agent step ──▶ OpenClaw ──▶ H Company agent                 │
@@ -73,16 +72,16 @@ Built at The Computer Use Hackathon (H Company / NVIDIA / Accel), Jul 11–12 20
 snowglobe/
   perception/    # Python: sampler → Cosmos 3 Reasoner → events           (Person A)
   automation/    # Python/FastAPI: workflow engine + OpenClaw + Composio  (Person B)
-  dashboard/     # React: console + workflow builder UI  [BUILT — extend] (Person C)
-  shared/        # event_schema.json + workflow_schema.json — the contracts
-  demo/          # clips, fake-event scripts, pitch assets
+  dashboard/     # React: console + workflow builder UI  [BUILT, extend] (Person C)
+  shared/        # event_schema.json + workflow_schema.json: the contracts
+  demo/          # clips, event sender scripts, pitch assets
 ```
 
 ## Data contracts (freeze by hour 2)
 
-**Event** — already frozen, see [shared/event_schema.json](shared/event_schema.json).
+**Event**: already frozen, see [shared/event_schema.json](shared/event_schema.json).
 
-**Workflow** — what the builder UI edits and the engine executes:
+**Workflow**: what the builder UI edits and the engine executes:
 
 ```json
 {
@@ -109,12 +108,12 @@ snowglobe/
 ```
 
 - `zone` is optional (omit = any zone). `cooldown_sec` dedups: one run per
-  (workflow, zone) per window — a spill at 1 fps must fire once, not thirty times.
+  (workflow, zone) per window: a spill at 1 fps must fire once, not thirty times.
 - `{{event.*}}` templating is resolved by the engine before each step runs.
 - Steps execute sequentially; a failed step marks the run failed (no retries
   in v1 except inside OpenClaw for agent runs).
 
-**Run** — one execution of a workflow, what the dashboard's live view polls:
+**Run**: one execution of a workflow, what the dashboard's live view polls:
 
 ```json
 {
@@ -134,7 +133,7 @@ snowglobe/
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /events` | perception (or fake script) submits events |
+| `POST /events` | perception (or test script) submits events |
 | `GET /events?limit=N` | dashboard event feed |
 | `GET/POST/PUT/DELETE /workflows` | builder CRUD |
 | `GET /runs?limit=N`, `GET /runs/{id}` | live runs view |
@@ -145,13 +144,13 @@ snowglobe/
 | Type | Executor | Config | Notes |
 |---|---|---|---|
 | `h_agent` | OpenClaw → H Company agent | task kind (google_form / ticket / custom_url), url, templated instructions | The judged capability. Capture replay/screenshots into run output |
-| `composio` | Composio SDK | action (drive_upload, sheets_append, slack_message), templated params | API-shaped work stays here — don't waste agent runs on it |
+| `composio` | Composio SDK | action (drive_upload, sheets_append, slack_message), templated params | API-shaped work stays here. Don't waste agent runs on it |
 | `condition` | engine built-in | expression on event payload, e.g. `payload.count > 20` | Stops the run quietly if false |
 | `voice` (stretch) | Gradium API | templated text to speak | Gradium Challenge |
 
-## Work split — 3 people
+## Work split (3 people)
 
-### Person A — "Eyes" (perception, Python/CV)
+### Person A: "Eyes" (perception, Python/CV)
 
 1. Frame sampler: OpenCV capture from webcam / RTSP / video file at ~1 fps,
    selected with a `--source` flag. Save each sampled frame to `snapshots/`
@@ -160,24 +159,24 @@ snowglobe/
    force JSON output; parse and validate against the event schema.
    - Model choice: `cosmos3-nano-reasoner` (hosted NIM on build.nvidia.com)
      is the default; upgrade to **Cosmos 3 Super**'s 32B reasoner if NVIDIA
-     gives us datacenter GPU access at the event (ask their mentors — Super
+     gives us datacenter GPU access at the event (ask their mentors: Super
      needs Hopper/Blackwell; Nano runs on workstation GPUs). Nemotron VL is
      the fallback if Cosmos endpoints rate-limit.
    - Why Cosmos over a generic VLM: it's post-trained for physical-world
-     video reasoning — timestamped event localization, bounding-box
-     grounding, physical common sense — and leads the smart-space benchmarks.
+     video reasoning (timestamped event localization, bounding-box
+     grounding, physical common sense) and leads the smart-space benchmarks.
      Exactly our spill/PPE/crowd problem, and the strongest NVIDIA
      Challenge story.
 3. Prompt library: spill, person_count, foot_traffic (counts over a window),
    safety_violation (PPE / blocked exit). Tune on saved demo clips, not the
-   live camera — cached frames make iteration free.
+   live camera; cached frames make iteration free.
 4. Event emitter: `POST /events`, plus a `--dump` mode (write JSONL to a file)
    so A never blocks on B.
 5. Record 3–4 demo clips (staged water spill, crowd walk-through,
    missing-hard-hat) and calibrate per-event-type confidence on them.
 6. Stretch: local YOLO overlay for bounding-box visuals in the dashboard.
 
-### Person B — "Brain" (automation backend, Python/FastAPI)
+### Person B: "Brain" (automation backend, Python/FastAPI)
 
 1. **Hour-0 spike (highest risk first):** using our existing credits, drive
    one H Company agent run through OpenClaw that fills a throwaway Google
@@ -188,20 +187,20 @@ snowglobe/
 4. Workflow engine: sequential step executor, `{{event.*}}` templating,
    run + per-step status persistence, async execution (runs must never block
    event ingestion).
-5. Step executors: `h_agent` (via OpenClaw — session lifecycle, retry once,
+5. Step executors: `h_agent` (via OpenClaw: session lifecycle, retry once,
    capture replay URL/screenshots into run output), `composio` (Drive,
    Sheets, Slack), `condition`.
-6. `send_fake_event.py` + seeded workflows so B and C never block on A.
+6. `send_event.py` + seeded workflows so B and C never block on A.
 7. Stretch: `voice` step via Gradium.
 
-### Person C — "Face" (dashboard + demo, React/TS)
+### Person C: "Face" (dashboard + demo, React/TS)
 
 The dashboard already exists (cameras, integrations, automations, event log,
-live feed — see [dashboard/README.md](dashboard/README.md)). C upgrades it
+live feed, see [dashboard/README.md](dashboard/README.md)). C upgrades it
 from mock-backed to real and turns the Automations page into the builder:
 
 1. **Workflow builder UI**: trigger panel (event type, zone, confidence,
-   cooldown) + ordered step list — add/remove/reorder steps, per-type config
+   cooldown) + ordered step list, add/remove/reorder steps, per-type config
    forms (h_agent: task kind, URL, instructions textarea with `{{event.*}}`
    hints; composio: action picker + params; condition: expression).
    Canvas/drag-drop is a nice-to-have; a list-based editor is enough to win.
@@ -219,9 +218,9 @@ from mock-backed to real and turns the Automations page into the builder:
 | When | Checkpoint |
 |---|---|
 | Hr 2 | Contracts frozen: workflow + run schemas agreed, `POST /events` live |
-| Hr 6 | Fake spill event → workflow run → Slack message fires; runs visible in dashboard |
-| Hr 10 | **H agent fills the Google Form end-to-end from a fake event** — replay visible in runs view |
-| Hr 16 | Real camera → real event → full run. First true end-to-end |
+| Hr 6 | Test spill event → workflow run → Slack message fires; runs visible in dashboard |
+| Hr 10 | **H agent fills the Google Form end-to-end from a test event**, replay visible in runs view |
+| Hr 16 | Real camera → real event → full run. First end-to-end |
 | Hr 24 | All 4 event types working; builder can create a new workflow from scratch live |
 | Hr 34 | Feature freeze. Record fallback demo videos, rehearse twice |
 
@@ -229,12 +228,12 @@ from mock-backed to real and turns the Automations page into the builder:
 
 The side challenge is literal: **NemoClaw** is NVIDIA's open-source stack for
 running agent harnesses (OpenClaw, Hermes, Deep Agents) sandboxed in NVIDIA
-OpenShell on their hardware. H's **HoloDesktop CLI** runs H Agent on-device —
-powered by the **Holo 3.1** computer-use models NVIDIA quantized (2× faster,
-−35% memory on their GPUs) — and plugs into NemoClaw via MCP/ACP as the
+OpenShell on their hardware. H's **HoloDesktop CLI** runs H Agent on-device
+(powered by the **Holo 3.1** computer-use models NVIDIA quantized: 2× faster,
+−35% memory on their GPUs) and plugs into NemoClaw via MCP/ACP as the
 agent's eyes and hands.
 
-Integration (needs an NVIDIA GPU box — ask mentors for RTX / DGX Spark access):
+Integration (needs an NVIDIA GPU box; ask mentors for RTX / DGX Spark access):
 1. Install NemoClaw (single-command blueprint) on the GPU machine.
 2. Install HoloDesktop CLI; register it in NemoClaw as the MCP computer-use
    tool. Holo 3.1 quantized checkpoints run locally on the GPU.
@@ -256,7 +255,7 @@ Integration (needs an NVIDIA GPU box — ask mentors for RTX / DGX Spark access)
 5. Slack alert pops, Drive folder shows the snapshot, sheet gets a row.
 6. Kicker: open the workflow builder and, live, add a "safety violation →
    create ticket" workflow in ~20 seconds, then trigger it with a clip.
-   *"Anyone can wire the physical world to any software — no code."*
+   *"Anyone can wire the physical world to any software, no code."*
 
 ## Risks & mitigations
 
@@ -267,14 +266,14 @@ Integration (needs an NVIDIA GPU box — ask mentors for RTX / DGX Spark access)
 | Event spam (1 fps) | `cooldown_sec` per workflow from day one |
 | NIM rate limits / credits | Tune prompts on saved clips (cached responses), 1 fps sampling |
 | Builder UI scope creep | List-based steps, not canvas; drag-drop only if hours remain |
-| Team blocking on each other | Contracts by hr 2; fakes on every boundary (`--dump`, `send_fake_event.py`, dashboard simulation) |
+| Team blocking on each other | Contracts by hr 2; stubs on every boundary (`--dump`, `send_event.py`, dashboard simulation) |
 
 ## Prize alignment
 
 - **Main (H Company):** agents doing visible multi-step UI work, composable
-  by end users in a workflow builder — a genuinely new interface to their tech.
+  by end users in a workflow builder, a new interface to their tech.
 - **NVIDIA Challenge ("run the H Company models through NemoClaw"):**
   Holo 3.1 executing our workflow tasks locally through NemoClaw on NVIDIA
-  hardware (see the NemoClaw section) — plus Cosmos 3 Reasoner powering
+  hardware (see the NemoClaw section), plus Cosmos 3 Reasoner powering
   perception, so the stack is NVIDIA-accelerated end to end.
 - **Gradium Challenge:** voice step in the builder (stretch).

@@ -1,6 +1,6 @@
 # dashboard
 
-The Snowglobe console — a single-page app to connect cameras, manage
+The Snowglobe console, a single-page app to connect cameras, manage
 integrations, wire up automations, and watch the live event feed and agent
 activity.
 
@@ -25,14 +25,14 @@ clears it.
 
 ## Pages
 
-- **Overview** — stat tiles, live event feed, agent-activity panel.
-- **Cameras** — connect a webcam / RTSP / HLS / clip, pick a zone and which
+- **Overview**: stat tiles, live event feed, agent-activity panel.
+- **Cameras**: connect a webcam / RTSP / HLS / clip, pick a zone and which
   event types to detect; pause/resume/remove.
-- **Integrations** — connect H Company Agent, Google Drive/Sheets, Slack,
+- **Integrations**: connect H Company Agent, Google Drive/Sheets, Slack,
   Gradium Voice, custom webhooks; or create a new integration target.
-- **Automations** — rules mapping an event type (+ zone + confidence
+- **Automations**: rules mapping an event type (+ zone + confidence
   threshold) to a set of integration actions.
-- **Event log** — full, filterable event history.
+- **Event log**: full, filterable event history.
 
 ## Structure
 
