@@ -17,7 +17,7 @@ All clips are royalty-free stock (Mixkit), 720p, a few seconds each.
 | 04 | `04_grocery_produce_shopper.mp4` | One person in the produce aisle | `person_count` = **1**, conf ~0.95 | Single-occupant baseline |
 | 05 | `05_foot_traffic_street.mp4` | People moving down a street | `person_count` ~5–10, `foot_traffic` ~10 | Moderate throughput baseline |
 
-## CCTV evaluation clips (06-15)
+## CCTV evaluation clips (06-20)
 
 These are fixed-camera or surveillance-style evaluation clips collected from
 public, reusable sources. They have been visually checked, but their VLM outputs
@@ -36,6 +36,11 @@ set above.
 | 13 | `13_supermarket_grocery_products.mp4` | Produce-display grocery footage (frontal product movement and shoppers passing by) | 2:22.8, 1920x1080 H.264 MP4 | B-roll-like grocery retail scene for person detection and zone activity tests |
 | 14 | `14_onestopenter1front.mp4` | Front-view store-entry corridor scene with people | 60.0 s, 384x288 H.264 MP4 | Store entry/exit and person occupancy baseline |
 | 15 | `15_onestopmovenoenter1front.mp4` | Front-view retail-corridor people flow with waiting/throughput patterns | 66.6 s, 384x288 H.264 MP4 | Person count and foot traffic under moderate crowding |
+| 16 | `16_retailaction_take.mp4` | RetailAction dataset frame with shelf **take** action | 5.3 s, 600x600 H.264 MP4 | Shelf-event candidate for stock-change detection |
+| 17 | `17_retailaction_take_3.mp4` | RetailAction dataset frame with shelf **take** action | 5.3 s, 600x600 H.264 MP4 | Shelf-action candidate for stock-change detection |
+| 18 | `18_retailaction_take_10.mp4` | RetailAction dataset frame with shelf **take** action | 5.3 s, 600x600 H.264 MP4 | Shelf-action candidate for stock-change detection |
+| 19 | `19_merl_shelf_interaction_1_1.mp4` | MERL shelf interaction sequence with hand-to-shelf and shelf inspection | 2:10.7, 920x680 H.264 MP4 | Shelf-event candidate for stock/depletion reasoning |
+| 20 | `20_merl_shelf_interaction_10_1.mp4` | MERL shelf interaction sequence with hand-to-shelf and inspection gestures | 2:06.5, 920x680 H.264 MP4 | Shelf-event candidate for stock/depletion reasoning |
 
 Every clip in this main folder is H.264 MP4 with `yuv420p` pixel format and
 fast-start metadata so editor and browser previews work. Source files for MPEG/WebM
@@ -111,3 +116,15 @@ Retrieved 2026-07-11. Keep these attributions with any redistributed copies.
   [14 — OneStopEnter1front.mpg](https://homepages.inf.ed.ac.uk/rbf/CAVIARDATA2/OneStopEnter1front/OneStopEnter1front.mpg)
   and [15 — OneStopMoveNoEnter1front.mpg](https://homepages.inf.ed.ac.uk/rbf/CAVIARDATA2/OneStopMoveNoEnter1front/OneStopMoveNoEnter1front.mpg),
   reused under CAVIAR dataset usage terms.
+
+- **16-18 — Voxel51 RetailAction (Hugging Face).** Shelf interaction subset from
+  [`Voxel51/RetailAction`](https://huggingface.co/datasets/Voxel51/RetailAction), which includes
+  explicit take/put/touch actions. Original clips downloaded as
+  `source_originals/rank0_video.mp4`, `source_originals/rank0_video-3.mp4`, and
+  `source_originals/rank0_video-10.mp4`.
+
+- **19-20 — Voxel51 MERL Shopping Dataset (Hugging Face).** Shelf-interaction retail
+  sequences from
+  [`Voxel51/MERL_Shopping_Dataset`](https://huggingface.co/datasets/Voxel51/MERL_Shopping_Dataset)
+  with labels like `Hand in Shelf`, `Reach to Shelf`, and `Inspect Product`. Original clips
+  downloaded as `source_originals/1_1_crop.mp4` and `source_originals/10_1_crop.mp4`.
