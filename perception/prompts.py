@@ -34,7 +34,11 @@ PRODUCT_CONTEXT = (
     "hours, or a rapidly emptying/panicking crowd. "
     "Also report a visible person physically interacting with merchandise: "
     "picking up, holding, carrying, placing into a bag/cart, or removing an item "
-    "from a shelf. Name the specific visible object in the detail. These findings "
+    "from a shelf. In the detail, name the specific object AND read its brand / "
+    "product name off the packaging if any text or logo is legible "
+    "(e.g. \"person picks a Cap'n Crunch cereal box off the shelf\"); if the "
+    "label is not clearly readable, describe it generically instead of guessing. "
+    "These findings "
     "are treated as hypotheses and will only fire when adjacent-frame motion and "
     "local object detection independently corroborate them. "
     "Do NOT report inert objects, "
@@ -62,14 +66,19 @@ _VERDICT_HINT = (
 _DISCOVER_HINT = (
     ' Respond with ONLY a JSON array (possibly empty) of findings, each exactly '
     'like: {"event_type": <short snake_case label you choose, e.g. "spill", '
-    '"blocked_exit", "person_on_ground", "overcrowding", "item_pickup", '
-    '"item_placed_in_bag", "shelf_interaction">, '
+    '"blocked_exit", "person_on_ground", "overcrowding", '
+    '"item_removed_from_shelf", "item_placed_in_bag">, '
     '"severity": <"low"|"medium"|"high">, '
     '"confidence": <number 0..1>, "count": <integer or null, e.g. number of '
     'people involved>, "detail": <one short human-readable sentence; for an '
-    'interaction, name the object, e.g. "person picks a bottle off the shelf">}. '
+    'interaction, name the object and its brand/product name if the label is '
+    'legible, e.g. "person picks a Cap\'n Crunch cereal box off the shelf">}. '
     'Choose the most specific, reusable event_type slug that describes each '
-    'finding. Only include findings with severity "medium" or "high" — omit '
+    'finding. IMPORTANT: for a person taking or removing merchandise off a shelf, '
+    'ALWAYS use the exact slug "item_removed_from_shelf" (do not invent variants '
+    'like "shelf_interaction" or "item_pickup") so downstream automations match '
+    'it consistently. '
+    'Only include findings with severity "medium" or "high" — omit '
     'anything "low" or merely descriptive. Return [] if nothing actionable is '
     'present.'
 )
