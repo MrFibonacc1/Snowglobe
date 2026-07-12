@@ -64,4 +64,67 @@ WORKFLOWS = [
             },
         ],
     },
+    # --- Crowd-traffic branching (two workflows, same trigger) ----------------
+    # Both fire on foot_traffic; each gates on its own count threshold, so one
+    # event routes to "busy" OR "quiet" behavior — the high/low branch.
+    {
+        "id": "wf_busy_zone",
+        "name": "Busy zone → staff alert",
+        "enabled": True,
+        "trigger": {
+            "event_type": "foot_traffic",
+            "min_confidence": 0.5,
+            "cooldown_sec": 60,
+        },
+        "steps": [
+            {
+                "id": "s1",
+                "type": "condition",
+                "config": {"expression": "payload.count > 30"},
+            },
+            {
+                "id": "s2",
+                "type": "composio",
+                "config": {
+                    "action": "slack_message",
+                    "channel": "#floor",
+                    "text": "High traffic in {{event.location}} "
+                            "({{event.payload.count}} people) — send more staff.",
+                },
+            },
+        ],
+    },
+    {
+        "id": "wf_quiet_zone",
+        "name": "Quiet zone → research goods (H agent)",
+        "enabled": True,
+        "trigger": {
+            "event_type": "foot_traffic",
+            "min_confidence": 0.5,
+            "cooldown_sec": 60,
+        },
+        "steps": [
+            {
+                "id": "s1",
+                "type": "condition",
+                "config": {"expression": "payload.count < 10"},
+            },
+            {
+                "id": "s2",
+                "type": "h_agent",
+                "config": {
+                    "task": "custom_url",
+                    "agent": "h/web-surfer-flash",
+                    "share": True,
+                    "instructions": (
+                        "It's a slow period at the shop, so use the downtime to "
+                        "research supplies. Search the web for the current "
+                        "wholesale price of coffee beans, open a supplier or "
+                        "pricing page, and report the typical price per pound "
+                        "with the source URL."
+                    ),
+                },
+            },
+        ],
+    },
 ]
