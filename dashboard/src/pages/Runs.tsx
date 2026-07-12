@@ -187,11 +187,11 @@ function StepDetail({ step }: { step: RunStep }) {
     return <div className="text-xs text-muted-foreground">{bits.join(' · ') || 'agent run'}</div>
   }
   if (step.type === 'composio') {
-    const stub = out.stubbed ? ' (stubbed)' : ''
     return (
       <div className="text-xs text-muted-foreground">
-        {String(out.action ?? 'composio')}
-        {stub}
+        {out.executed === true
+          ? `${String(out.action ?? 'composio')} · external action confirmed`
+          : `${String(out.action ?? 'composio')} · execution not confirmed`}
       </div>
     )
   }

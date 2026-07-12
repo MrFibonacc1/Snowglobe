@@ -27,6 +27,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 import engine
+import composio_status
 import generate
 import seeds
 import storage
@@ -179,7 +180,7 @@ async def status():
             "key_present": bool(os.environ.get("HAI_API_KEY")),
             "region": os.environ.get("HAI_AGENT_REGION", "eu"),
         },
-        "composio": {"configured": bool(os.environ.get("COMPOSIO_API_KEY"))},
+        "composio": await asyncio.to_thread(composio_status.get_composio_status),
         "gradium": {"configured": bool(os.environ.get("GRADIUM_API_KEY"))},
         "nemoclaw": {
             "url": os.environ.get("NEMOCLAW_A2A_URL", "http://localhost:8123"),

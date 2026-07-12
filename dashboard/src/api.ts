@@ -80,7 +80,14 @@ export interface LiveCameraStatus {
 
 export interface BackendStatus {
   h_agent: { mode: string; key_present: boolean; region: string }
-  composio: { configured: boolean }
+  composio: {
+    configured: boolean
+    key_present: boolean
+    execution_ready: boolean
+    toolkits: { slack: boolean; googlesheets: boolean; googledrive: boolean }
+    reason: string | null
+    checked_at: string
+  }
   gradium: { configured: boolean }
   nemoclaw: { url: string; active: boolean }
   counts: { events: number; workflows: number; runs: number }

@@ -44,17 +44,26 @@ const ENV_MANAGED: Record<string, (s: BackendStatus) => { connected: boolean; la
     connected: s.h_agent.key_present,
     label: s.h_agent.key_present ? `mode: ${s.h_agent.mode}` : undefined,
   }),
-  gdrive: (s) => ({ connected: s.composio.configured, label: s.composio.configured ? 'via Composio' : undefined }),
-  gsheets: (s) => ({ connected: s.composio.configured, label: s.composio.configured ? 'via Composio' : undefined }),
-  slack: (s) => ({ connected: s.composio.configured, label: s.composio.configured ? 'via Composio' : undefined }),
+  gdrive: (s) => ({
+    connected: s.composio.execution_ready && s.composio.toolkits.googledrive,
+    label: s.composio.execution_ready && s.composio.toolkits.googledrive ? 'execution ready' : undefined,
+  }),
+  gsheets: (s) => ({
+    connected: s.composio.execution_ready && s.composio.toolkits.googlesheets,
+    label: s.composio.execution_ready && s.composio.toolkits.googlesheets ? 'execution ready' : undefined,
+  }),
+  slack: (s) => ({
+    connected: s.composio.execution_ready && s.composio.toolkits.slack,
+    label: s.composio.execution_ready && s.composio.toolkits.slack ? 'execution ready' : undefined,
+  }),
   gradium_voice: (s) => ({ connected: s.gradium.configured }),
 }
 
 const ENV_HINT: Record<string, string> = {
   h_agent: 'Set HAI_API_KEY in automation/.env',
-  gdrive: 'Set COMPOSIO_API_KEY + link account (NOTES.md)',
-  gsheets: 'Set COMPOSIO_API_KEY + link account (NOTES.md)',
-  slack: 'Set COMPOSIO_API_KEY + link account (NOTES.md)',
+  gdrive: 'Requires an execution-enabled Composio key and linked Google Drive account',
+  gsheets: 'Requires an execution-enabled Composio key and linked Google Sheets account',
+  slack: 'Requires an execution-enabled Composio key and linked Slack account',
   gradium_voice: 'Set GRADIUM_API_KEY in automation/.env',
 }
 
@@ -134,6 +143,9 @@ export function Integrations({ store }: { store: Store }) {
             </Badge>
             <Badge variant="outline">
               NemoClaw {status.nemoclaw.active ? `-> ${status.nemoclaw.url}` : 'inactive'}
+            </Badge>
+            <Badge variant={status.composio.configured ? 'secondary' : 'destructive'}>
+              Composio {status.composio.configured ? 'execution ready' : status.composio.reason ?? 'not ready'}
             </Badge>
             <Badge variant="outline">{status.counts.workflows} workflows</Badge>
             <Badge variant="outline">{status.counts.events} events</Badge>

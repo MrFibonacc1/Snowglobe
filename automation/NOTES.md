@@ -1,8 +1,8 @@
 # Integration notes — H Company & Composio
 
-How the two external integrations work and how to flip them from stub/mock to
-real. The service runs fully without any keys (h_agent mocks, composio stubs)
-so nobody is ever blocked.
+How the two external integrations work and how to flip them from mock or
+unavailable to real. The service runs without integration keys, but Composio
+steps fail closed until the external action is confirmed.
 
 ## H Company agent (`steps/h_agent.py`)
 
@@ -97,8 +97,8 @@ Executor calls `client.tools.execute(slug=…, user_id=…, arguments=…)`. Slu
 | `drive_upload` | `GOOGLEDRIVE_UPLOAD_FILE` | file_to_upload, folder_to_upload_to |
 | `sheets_append` | `GOOGLESHEETS_BATCH_UPDATE` | spreadsheet_id, sheet_name, values |
 
-Without `COMPOSIO_API_KEY`, actions log their payload and return
-`{"stubbed": true}` — runs still complete, dashboard still animates.
+Without `COMPOSIO_API_KEY`, actions raise an execution error and the workflow
+run is marked failed. A missing integration can no longer animate as delivered.
 
 ### Verified status (2026-07-11) — ⚠️ key reads but cannot execute
 
@@ -117,11 +117,11 @@ Ran `python test_composio_connection.py` with the provided key:
   Slack / Google Sheets / Google Drive** connection — which is what our
   workflows use.
 
-**Graceful degradation (added):** on a 401/"not configured" error the
-`composio` step no longer fails the run — it returns
-`{stubbed, unavailable, reason}` and the step is marked `done`, so a workflow's
-H-agent step still succeeds. Genuine errors (bad args, unknown tool) still
-raise. Verified: occupancy workflow → run `done`, composio step `unavailable`.
+**Fail-closed execution:** a 401, missing linked account, missing key, or SDK
+response without `successful: true` fails the Composio step and the overall
+workflow. `GET /status` separately reports key presence, execution readiness,
+and active Slack/Sheets/Drive accounts so the dashboard cannot equate a key
+with delivery.
 
 **To make it actually run (two independent blockers, both user-side):**
 1. Get a Composio key with **tool-execution** rights (or enable execution on

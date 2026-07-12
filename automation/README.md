@@ -9,7 +9,7 @@ executes steps sequentially with `{{event.*}}` templating and persists
 per-step status live:
 
 - **h_agent** — H Company hosted Agent API (or mock). No local browser. See [NOTES.md](NOTES.md).
-- **composio** — Slack / Drive / Sheets via Composio SDK (or stub). See [NOTES.md](NOTES.md).
+- **composio** — Slack / Drive / Sheets via Composio SDK; fails unless execution is confirmed. See [NOTES.md](NOTES.md).
 - **condition** — gate on event payload, e.g. `payload.count > 20`.
 - **voice** — Gradium stretch (stub).
 
@@ -32,8 +32,8 @@ Then in another terminal:
 curl -s localhost:8000/runs | python3 -m json.tool   # watch steps progress
 ```
 
-No API keys needed — h_agent mocks and composio stubs. To go real, follow
-[NOTES.md](NOTES.md).
+No API keys are needed to develop the engine, but Composio steps fail closed
+until real execution is configured. To go real, follow [NOTES.md](NOTES.md).
 
 ## Layout
 

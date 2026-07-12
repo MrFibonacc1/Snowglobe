@@ -1,8 +1,9 @@
 """Composio step — API-shaped actions (Drive, Sheets, Slack).
 
 With COMPOSIO_API_KEY set (and `pip install composio`), executes the real
-action via Composio's SDK. Without it, stubs: logs the payload and returns
-{"stubbed": true} so demos never hard-block on account connections.
+action via Composio's SDK. It fails closed when credentials, execution rights,
+or linked accounts are missing: a workflow may never claim an external action
+completed when nothing was sent.
 
 Setup (full walkthrough in automation/NOTES.md):
   pip install composio
@@ -25,7 +26,15 @@ _SLUGS = {
     "sheets_append": "GOOGLESHEETS_BATCH_UPDATE",
 }
 
-_USER_ID = os.environ.get("COMPOSIO_USER_ID", "default")
+
+class ComposioExecutionError(RuntimeError):
+    """The requested external action was not confirmed as executed."""
+
+
+def _create_client(api_key: str):
+    from composio import Composio  # lazy: optional dependency
+
+    return Composio(api_key=api_key)
 
 
 def execute(config: dict, event: dict) -> dict:
@@ -36,38 +45,33 @@ def execute(config: dict, event: dict) -> dict:
     arguments = _build_arguments(action, config)
     api_key = os.environ.get("COMPOSIO_API_KEY")
     if not api_key:
-        print(f"[composio stub] {action}: {arguments}")
-        return {"stubbed": True, "action": action, "arguments": arguments}
+        raise ComposioExecutionError(
+            "Composio is not configured: COMPOSIO_API_KEY is missing; action was not sent"
+        )
 
-    from composio import Composio  # lazy: optional dependency
-
-    client = Composio(api_key=api_key)
+    client = _create_client(api_key)
     # SDK 0.17+ requires an explicit toolkit version for manual execution;
     # skip the check so we always run against the latest.
     try:
         result = client.tools.execute(
             slug=_SLUGS[action],
-            user_id=_USER_ID,
+            user_id=os.environ.get("COMPOSIO_USER_ID", "default"),
             arguments=arguments,
             dangerously_skip_version_check=True,
         )
     except Exception as exc:  # noqa: BLE001
-        # "Not configured yet" conditions (key can't execute, no linked
-        # account) shouldn't fail an otherwise-good run — degrade to a
-        # clearly-labeled stub so e.g. a successful H-agent step still counts.
-        # Genuine bugs (bad args, unknown tool) re-raise.
         reason = _degradable_reason(str(exc))
         if reason:
-            print(f"[composio unavailable] {action}: {reason}")
-            return {
-                "stubbed": True,
-                "unavailable": True,
-                "action": action,
-                "reason": reason,
-                "arguments": arguments,
-            }
+            raise ComposioExecutionError(
+                f"Composio {action} not executed: {reason}"
+            ) from exc
         raise
-    return {"stubbed": False, "action": action, "result": _summarize(result)}
+
+    summary = _summarize(result)
+    if summary.get("successful") is not True:
+        error = _result_value(result, "error") or "Composio did not confirm success"
+        raise ComposioExecutionError(f"Composio {action} not executed: {error}")
+    return {"executed": True, "action": action, "result": summary}
 
 
 def _degradable_reason(err: str) -> str | None:
@@ -103,6 +107,8 @@ def _build_arguments(action: str, config: dict) -> dict:
 
 def _summarize(result) -> dict:
     # Composio responses can be large; keep what the runs view needs.
+    if not isinstance(result, dict) and hasattr(result, "model_dump"):
+        result = result.model_dump()
     if isinstance(result, dict):
         return {
             "successful": result.get("successful", result.get("success")),
@@ -111,3 +117,9 @@ def _summarize(result) -> dict:
             else None,
         }
     return {"raw": str(result)[:300]}
+
+
+def _result_value(result, key: str):
+    if isinstance(result, dict):
+        return result.get(key)
+    return getattr(result, key, None)
