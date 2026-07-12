@@ -33,13 +33,22 @@ DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
 # Default is a Nemotron-VL model that IS served on hosted inference
 # (integrate.api.nvidia.com) and verified to read frames + return our JSON.
-#   - Cosmos physical-AI reasoner (`nvidia/cosmos-reason2-8b`) is the intended
-#     primary, but 404s on hosted inference for our account — it needs a
-#     self-hosted NIM container / GPU access. Point VLM_BASE_URL at that NIM
-#     and set VLM_MODEL=nvidia/cosmos-reason2-8b once we have the GPUs.
+#   - Cosmos reasoner (Cosmos 3 Super / `nvidia/cosmos-reason2-8b`) is the
+#     intended primary, but 404s on hosted inference for our account — it needs
+#     a self-hosted NIM container / GPU access. Deploy the NIM on Baseten
+#     (see deploy/baseten-cosmos3/) and point VLM_BASE_URL at the Baseten model
+#     endpoint, VLM_API_KEY at your Baseten key, VLM_AUTH_SCHEME=api-key, and
+#     VLM_MODEL at the served model id.
 #   - `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` is a larger hosted
 #     alternative (reasoning; emits <think> blocks we already strip).
 DEFAULT_MODEL = "nvidia/nemotron-nano-12b-v2-vl"
+
+# Two-tier detection: a stronger model does the open-ended DISCOVERY pass (the
+# hard "what actionable events are here?" reasoning), while the fast/cheap
+# DEFAULT_MODEL handles targeted per-frame yes/no verification. llama-3.2-90b is
+# the strongest image reasoner verified callable on hosted inference right now.
+# Set VLM_DISCOVER_MODEL="" (empty) to use VLM_MODEL for discovery too.
+DEFAULT_DISCOVER_MODEL = "meta/llama-3.2-90b-vision-instruct"
 
 DEFAULT_AUTOMATION_URL = "http://localhost:8000"
 # Static host for saved frames; see snapshot_server.py. None → emit local paths.
@@ -49,8 +58,10 @@ DEFAULT_SNAPSHOT_BASE_URL = "http://localhost:8001"
 @dataclass
 class Config:
     api_key: str | None
+    auth_scheme: str
     base_url: str
     model: str
+    discover_model: str
     automation_url: str
     snapshot_base_url: str | None
     snapshot_dir: str
@@ -61,10 +72,19 @@ class Config:
     @classmethod
     def from_env(cls) -> "Config":
         _load_env()
+        # VLM_API_KEY takes precedence so a self-hosted endpoint (e.g. a NIM
+        # behind Baseten) can use its own key without touching NVIDIA_API_KEY.
+        # auth_scheme selects the header: "bearer" (Authorization: Bearer, the
+        # NVIDIA/OpenAI default) or "api-key" (Api-Key: ..., Baseten's scheme).
+        model = os.getenv("VLM_MODEL", DEFAULT_MODEL)
+        # Empty VLM_DISCOVER_MODEL → reuse the primary model for discovery too.
+        discover_model = os.getenv("VLM_DISCOVER_MODEL", DEFAULT_DISCOVER_MODEL) or model
         return cls(
-            api_key=os.getenv("NVIDIA_API_KEY"),
+            api_key=os.getenv("VLM_API_KEY") or os.getenv("NVIDIA_API_KEY"),
+            auth_scheme=os.getenv("VLM_AUTH_SCHEME", "bearer").strip().lower(),
             base_url=os.getenv("VLM_BASE_URL", DEFAULT_BASE_URL),
-            model=os.getenv("VLM_MODEL", DEFAULT_MODEL),
+            model=model,
+            discover_model=discover_model,
             automation_url=os.getenv("AUTOMATION_URL", DEFAULT_AUTOMATION_URL),
             snapshot_base_url=os.getenv("SNAPSHOT_BASE_URL", DEFAULT_SNAPSHOT_BASE_URL),
             snapshot_dir=os.getenv("SNAPSHOT_DIR", "snapshots"),

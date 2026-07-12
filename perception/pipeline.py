@@ -68,11 +68,17 @@ def run(cfg, args) -> int:
         per_frame.append("person_count")
 
     model_tag = "mock" if args.mock else cfg.model
+    discover_tag = "mock" if args.mock else cfg.discover_model
     sink = f"dump→{args.dump}" if args.dump else f"POST→{args.automation_url}/events"
     mode = "discover" if discovery else f"targeted={events}"
+    model_line = (
+        f"model={model_tag}"
+        if args.mock or not discovery or cfg.discover_model == cfg.model
+        else f"discover={cfg.discover_model} verify={cfg.model}"
+    )
     print(
         f"perception: source={args.source} zone={args.zone} fps={args.fps} "
-        f"mode={mode} model={model_tag}\n            {sink}",
+        f"mode={mode} {model_line}\n            {sink}",
         file=sys.stderr,
     )
 
@@ -114,7 +120,7 @@ def run(cfg, args) -> int:
                     event = emit_mod.build_event(
                         verdict.event_type, verdict, args.zone, frame,
                         snapshot_base_url=cfg.snapshot_base_url if not args.no_save else None,
-                        model=model_tag,
+                        model=discover_tag,
                     )
                     emitter.emit(event)
                     _log_event(event, verdict)

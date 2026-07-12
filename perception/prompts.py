@@ -26,11 +26,16 @@ PRODUCT_CONTEXT = (
     "warehouses, restaurants, facilities). Downstream, each event you report "
     "can trigger an automated action: alerting staff, filing an incident, "
     "dispatching a cleanup, or notifying security. Only report events that are "
-    "ACTIONABLE and worth a human's or an agent's attention — hazards, safety "
-    "or compliance issues, operational problems, security concerns, or notable "
-    "changes in occupancy/throughput. Do NOT report mundane, expected, or "
-    "non-actionable observations (e.g. a person simply standing, normal "
-    "shelving, ordinary decor)."
+    "ACTIONABLE right now — something a staff member, security guard, or manager "
+    "would get up and respond to. Examples of actionable: a spill or wet floor, "
+    "a blocked or propped-open exit, a fall or person on the ground, a fight or "
+    "aggression, a weapon, smoke or fire, an unattended bag, a long queue, "
+    "overcrowding, a machine/vehicle too close to a person, an intrusion after "
+    "hours, or a rapidly emptying/panicking crowd. Do NOT report inert objects, "
+    "decor, or normal scene contents (Christmas trees, furniture, signage, "
+    "plants, a person simply standing, shelves, ordinary foot traffic). If the "
+    "scene looks normal and safe, return an empty list — that is the correct and "
+    "expected answer most of the time."
 )
 
 SYSTEM = (
@@ -51,11 +56,14 @@ _VERDICT_HINT = (
 _DISCOVER_HINT = (
     ' Respond with ONLY a JSON array (possibly empty) of findings, each exactly '
     'like: {"event_type": <short snake_case label you choose, e.g. "spill", '
-    '"blocked_exit", "forklift_near_person", "overcrowding">, '
+    '"blocked_exit", "person_on_ground", "overcrowding">, '
+    '"severity": <"low"|"medium"|"high">, '
     '"confidence": <number 0..1>, "count": <integer or null, e.g. number of '
     'people involved>, "detail": <one short human-readable sentence>}. '
     'Choose the most specific, reusable event_type slug that describes each '
-    'finding. Return [] if nothing actionable is present.'
+    'finding. Only include findings with severity "medium" or "high" — omit '
+    'anything "low" or merely descriptive. Return [] if nothing actionable is '
+    'present.'
 )
 
 DISCOVER = (

@@ -25,6 +25,7 @@ class Verdict:
     confidence: float
     count: int | None = None
     detail: str | None = None
+    severity: str | None = None
     raw: str = ""
 
     def payload(self) -> dict:
@@ -33,6 +34,8 @@ class Verdict:
             p["count"] = self.count
         if self.detail:
             p["detail"] = self.detail
+        if self.severity:
+            p["severity"] = self.severity
         return p
 
 
@@ -99,7 +102,8 @@ def _verdicts_from_discovery(data, raw: str) -> list[Verdict]:
     """Parse the discovery pass output (a JSON array of findings) into Verdicts.
 
     The model chooses each finding's event_type slug; we normalize it but never
-    constrain it to a fixed set."""
+    constrain it to a fixed set. Findings the model marks "low" severity are
+    dropped here as a safety net in case the prompt's own gating leaks."""
     findings = data if isinstance(data, list) else data.get("findings") if isinstance(data, dict) else None
     if not isinstance(findings, list):
         return []
@@ -107,8 +111,13 @@ def _verdicts_from_discovery(data, raw: str) -> list[Verdict]:
     for item in findings:
         if not isinstance(item, dict):
             continue
+        severity = str(item.get("severity", "")).strip().lower()
+        if severity == "low":
+            continue  # not actionable enough to fire an automation
         event_type = _slugify_type(item.get("event_type") or item.get("type"))
         v = _verdict_from_json(event_type, item, raw=raw)
+        if severity in ("medium", "high"):
+            v.severity = severity
         # Discovery findings are, by definition, detected.
         v.detected = True
         verdicts.append(v)
@@ -144,22 +153,24 @@ class VLMDetector:
     def __init__(self, config):
         if not config.api_key:
             raise RuntimeError(
-                "NVIDIA_API_KEY is not set. Export it, or run with --mock for "
-                "offline development."
+                "No API key set. Export VLM_API_KEY (self-hosted / Baseten) or "
+                "NVIDIA_API_KEY (hosted), or run with --mock for offline "
+                "development."
             )
         self.cfg = config
         self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "Authorization": f"Bearer {config.api_key}",
-                "Accept": "application/json",
-            }
-        )
+        # Baseten fronts models with an "Api-Key: <key>" header; NVIDIA and
+        # other OpenAI-compatible servers use "Authorization: Bearer <key>".
+        if getattr(config, "auth_scheme", "bearer") == "api-key":
+            auth_header = {"Authorization": f"Api-Key {config.api_key}"}
+        else:
+            auth_header = {"Authorization": f"Bearer {config.api_key}"}
+        self.session.headers.update({**auth_header, "Accept": "application/json"})
 
-    def _chat(self, frame_bgr, prompt_text: str) -> str:
+    def _chat(self, frame_bgr, prompt_text: str, model: str | None = None) -> str:
         b64 = base64.b64encode(encode_jpeg(frame_bgr)).decode()
         body = {
-            "model": self.cfg.model,
+            "model": model or self.cfg.model,
             "messages": [
                 {"role": "system", "content": prompts.SYSTEM},
                 {
@@ -189,8 +200,10 @@ class VLMDetector:
         return text
 
     def discover(self, frame_bgr) -> list[Verdict]:
-        """Open-ended pass: the model names any actionable events it sees."""
-        text = self._chat(frame_bgr, prompts.discover())
+        """Open-ended pass: the model names any actionable events it sees.
+
+        Uses the (optionally stronger) discover_model for the hard reasoning."""
+        text = self._chat(frame_bgr, prompts.discover(), model=self.cfg.discover_model)
         return _verdicts_from_discovery(extract_json_array(text), raw=text)
 
     def detect(self, frame_bgr, event_type: str) -> Verdict:

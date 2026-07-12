@@ -1,0 +1,63 @@
+# Baseten custom-server deployment of the NVIDIA Cosmos reasoner NIM.
+#
+# This is a "no-build" custom server: Baseten copies the NIM image as-is and
+# runs it behind its autoscaling proxy. No model.py, no Docker build.
+#
+# The Cosmos physical-AI reasoner ships as a downloadable NIM container
+# (cosmos-reason1-7b). It is an OpenAI-compatible VLM server, so our perception
+# service talks to it exactly like the hosted NVIDIA endpoint — just a different
+# base_url + auth header (see deploy/baseten-cosmos3/README.md).
+#
+# Prereqs handled by YOU (see README): an NGC API key stored as two Baseten
+# secrets (DOCKER_REGISTRY_nvcr.io for the image pull, ngc_api_key for the
+# weight download), then `truss push` from this directory.
+
+model_name: cosmos3-reasoner-nim
+
+base_image:
+  # Downloadable Cosmos reasoner VLM NIM. Bump the tag as NVIDIA releases newer
+  # ones (check catalog.ngc.nvidia.com/orgs/nim/nvidia/containers/cosmos-reason1-7b).
+  image: nvcr.io/nim/nvidia/cosmos-reason1-7b:1.4.1
+
+docker_server:
+  # Copy the NIM image verbatim; do not run docker build.
+  no_build: true
+  # Secrets are mounted read-only at /secrets/<name>. The NIM downloads its
+  # weights on first boot using NGC_API_KEY, so we read the mounted secret into
+  # that env var and then hand off to the image's own entrypoint+CMD. exec keeps
+  # the server as PID 1 so Baseten's health/stop signals reach it directly.
+  # NIM images use /opt/nvidia/nvidia_entrypoint.sh as ENTRYPOINT; passing no
+  # args lets it run the image's default server CMD.
+  start_command: >-
+    bash -c "export NGC_API_KEY=$(cat /secrets/ngc_api_key) &&
+    export NIM_CACHE_PATH=/tmp/nim-cache && mkdir -p $NIM_CACHE_PATH &&
+    exec /opt/nvidia/nvidia_entrypoint.sh"
+  server_port: 8000
+  predict_endpoint: /v1/chat/completions
+  readiness_endpoint: /v1/health/ready
+  liveness_endpoint: /v1/health/live
+
+# NIM containers run as UID 1000, not root.
+run_as_user_id: 1000
+
+resources:
+  # Cosmos reasoner needs a single GPU with >= 48GB VRAM. H100 (80GB) gives the
+  # optimized TRT-LLM throughput profile. Drop to A100 to save cost (falls back
+  # to the latency profile). Do NOT go below 48GB single-GPU VRAM.
+  accelerator: H100
+  use_gpu: true
+
+# The NIM caches weights + compiles TRT engines on first boot; give it room.
+runtime:
+  health_checks:
+    # Max allowed is 3000s. Weight download + TRT-LLM engine build on a cold
+    # replica can take many minutes; don't let Baseten kill it prematurely.
+    startup_threshold_seconds: 3000
+    restart_threshold_seconds: 600
+    stop_traffic_threshold_seconds: 300
+
+secrets:
+  # Base64 of "$oauthtoken:<NGC_API_KEY>" — lets Baseten pull the image from nvcr.io.
+  DOCKER_REGISTRY_nvcr.io: null
+  # Raw NGC key — read by start_command into NGC_API_KEY for the weight download.
+  ngc_api_key: null

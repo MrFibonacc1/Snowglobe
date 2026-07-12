@@ -50,7 +50,12 @@ def _detector(mock: bool):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "model": _cfg.model, "has_key": bool(_cfg.api_key)}
+    return {
+        "ok": True,
+        "model": _cfg.model,
+        "discover_model": _cfg.discover_model,
+        "has_key": bool(_cfg.api_key),
+    }
 
 
 @app.post("/detect")
@@ -72,7 +77,10 @@ async def detect(
     discovery = not requested
 
     detector, used_mock = _detector(mock)
+    # Attribute events to the model that actually produced them: discovery runs
+    # on discover_model, targeted verification on the primary model.
     model_tag = "mock" if used_mock else _cfg.model
+    discover_tag = "mock" if used_mock else _cfg.discover_model
 
     # Persist the uploaded frame so emitted events have a resolvable snapshot_url.
     ts = datetime.now(timezone.utc)
@@ -106,11 +114,11 @@ async def detect(
                 emitted.append(
                     emit_mod.build_event(
                         v.event_type, v, zone, frame,
-                        snapshot_base_url=_cfg.snapshot_base_url, model=model_tag,
+                        snapshot_base_url=_cfg.snapshot_base_url, model=discover_tag,
                     )
                 )
-        return {"model": model_tag, "mock": used_mock, "mode": "discover",
-                "verdicts": verdicts, "events": emitted}
+        return {"kind": "image", "model": discover_tag, "mock": used_mock,
+                "mode": "discover", "verdicts": verdicts, "events": emitted}
 
     for et in requested:
         t = time.perf_counter()
@@ -194,6 +202,9 @@ async def detect_video(
 
     detector, used_mock = _detector(mock)
     model_tag = "mock" if used_mock else _cfg.model
+    discover_tag = "mock" if used_mock else _cfg.discover_model
+    # The model that actually produces the emitted events depends on the mode.
+    emit_tag = discover_tag if discovery else model_tag
 
     # Run every frame (and, in targeted mode, every event type) concurrently —
     # otherwise a 6-frame clip is many sequential ~1.2s calls. Capped workers
@@ -275,11 +286,11 @@ async def detect_video(
             fr, v = peak
             events_out.append(
                 emit_mod.build_event(et, v, zone, fr,
-                                     snapshot_base_url=_cfg.snapshot_base_url, model=model_tag)
+                                     snapshot_base_url=_cfg.snapshot_base_url, model=emit_tag)
             )
 
     return {
-        "kind": "video", "model": model_tag, "mock": used_mock,
+        "kind": "video", "model": emit_tag, "mock": used_mock,
         "mode": "discover" if discovery else "targeted",
         "fps": fps, "frames_analyzed": len(frames),
         "frames": frames_out, "summary": summary, "events": events_out,
