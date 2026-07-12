@@ -95,3 +95,5 @@ class Emitter:
     def close(self):
         if self._fh:
             self._fh.close()
+        if getattr(self, "_session", None):
+            self._session.close()

@@ -246,6 +246,8 @@ def _thumb(frame_img, width: int = 260) -> str:
     if w > width:
         frame_img = cv2.resize(frame_img, (width, max(1, int(h * width / w))))
     ok, buf = cv2.imencode(".jpg", frame_img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+    if not ok:
+        return ""
     return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()
 
 

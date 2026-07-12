@@ -29,7 +29,7 @@ def _field_match(field: str, value: int) -> bool:
             try:
                 if value % int(part[2:]) == 0:
                     return True
-            except ValueError:
+            except (ValueError, ZeroDivisionError):
                 continue
         elif "-" in part:
             a, _, b = part.partition("-")

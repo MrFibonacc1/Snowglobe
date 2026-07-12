@@ -166,6 +166,8 @@ export function Testing({ store }: { store: Store }) {
   // VideoResults, same as an uploaded video) instead of replacing a single
   // result every tick.
   const [liveFrames, setLiveFrames] = useState<FrameResult[]>([])
+  const liveFramesRef = useRef<FrameResult[]>([])
+  liveFramesRef.current = liveFrames
   const [liveEvents, setLiveEvents] = useState<Record<string, unknown>[]>([])
   const [liveModelLabel, setLiveModelLabel] = useState<{ model: string; mock: boolean } | null>(null)
   const [liveBusy, setLiveBusy] = useState(false)
@@ -179,6 +181,8 @@ export function Testing({ store }: { store: Store }) {
   const [browserLive, setBrowserLive] = useState(false)
   const [browserError, setBrowserError] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const mountedRef = useRef(true)
+  useEffect(() => () => { mountedRef.current = false }, [])
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   // Run IDs the most recent upload kicked off in the automation engine. The
@@ -268,6 +272,10 @@ export function Testing({ store }: { store: Store }) {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 } },
       })
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((t) => t.stop())
+        return
+      }
       setLiveStreaming(false) // only one live source analyzed at a time
       setBrowserStream(stream)
     } catch (e) {
@@ -300,11 +308,8 @@ export function Testing({ store }: { store: Store }) {
   }, [])
 
   // Revoke any remaining thumbnail object URLs when the page unmounts.
-  useEffect(() => {
-    return () => {
-      liveFrames.forEach((f) => URL.revokeObjectURL(f.thumb))
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => () => {
+    liveFramesRef.current.forEach((f) => URL.revokeObjectURL(f.thumb))
   }, [])
 
   useEffect(() => {

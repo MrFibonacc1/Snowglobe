@@ -156,7 +156,9 @@ def ground_verdicts(
         try:
             frame_dets = grounder.detect_all(frame_bgr)
         except Exception:
-            frame_dets = []
+            return verdicts            # detector errored; leave findings untouched
+        if not getattr(grounder, "enabled", False):
+            return verdicts            # model disabled itself during load; don't penalize
     for v in verdicts:
         phrases = phrases_for(v)
         if not phrases:

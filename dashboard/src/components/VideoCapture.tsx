@@ -50,6 +50,8 @@ export function VideoCapture({
   const [browserStream, setBrowserStream] = useState<MediaStream | null>(null)
   const [browserError, setBrowserError] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const mountedRef = useRef(true)
+  useEffect(() => () => { mountedRef.current = false }, [])
 
   // Live perception cameras available for a snapshot grab.
   const liveCameras = useMemo<Camera[]>(
@@ -99,6 +101,10 @@ export function VideoCapture({
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 } },
       })
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((t) => t.stop())
+        return
+      }
       setFile(null)
       setBrowserStream(stream)
     } catch (e) {
