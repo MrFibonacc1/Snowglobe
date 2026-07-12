@@ -12,6 +12,7 @@ import type {
   ResolveCameraResponse,
   Run,
   Workflow,
+  AgentFeed,
 } from './types'
 
 export const AUTOMATION_URL = import.meta.env.VITE_AUTOMATION_URL as
@@ -130,6 +131,14 @@ export const api = {
   // runs
   listRuns: (limit = 50) => req<Run[]>(`/runs?limit=${limit}`),
   getRun: (id: string) => req<Run>(`/runs/${id}`),
+
+  // live agent view — the agent's actual movements for an H session, proxied
+  // by the automation service so the browser can render screenshots + actions.
+  agentFeed: (sessionId: string) =>
+    req<AgentFeed>(`/agent/sessions/${encodeURIComponent(sessionId)}/events`, undefined, 15000),
+  // Absolute URL for a proxied screenshot path returned in an AgentFeed.
+  agentScreenshotUrl: (path: string) =>
+    AUTOMATION_URL ? `${AUTOMATION_URL}${path}` : path,
 
   // live cameras (perception service)
   perceptionConfigured: () => Boolean(PERCEPTION_URL),

@@ -30,8 +30,9 @@ except Exception:
 import jsonschema
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
+import agent_view
 import engine
 import composio_status
 import generate
@@ -220,6 +221,36 @@ async def get_run(run_id: str):
 @app.get("/health")
 async def health():
     return {"ok": True}
+
+
+# --- live agent view (H session movement stream, proxied for the browser) ---
+
+@app.get("/agent/sessions/{session_id}/events")
+async def get_agent_session_feed(session_id: str):
+    """The agent's live movements for one H session: latest screenshot (proxied),
+    cursor position, and an ordered action log. Powers the Overview's
+    'watch the agent work' box. See agent_view.py."""
+    try:
+        return await asyncio.to_thread(agent_view.fetch_session_feed, session_id)
+    except agent_view.AgentViewUnavailable as exc:
+        raise HTTPException(404, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — upstream/network hiccup
+        raise HTTPException(502, detail=f"agent event fetch failed: {exc}") from exc
+
+
+@app.get("/agent/screenshot")
+async def get_agent_screenshot(url: str):
+    """Stream an authed H trajectory screenshot to the browser (H image URLs
+    require the API key, so the browser can't load them directly)."""
+    try:
+        content, content_type = await asyncio.to_thread(agent_view.fetch_screenshot, url)
+    except agent_view.AgentViewUnavailable as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, detail=f"screenshot fetch failed: {exc}") from exc
+    # Short cache: screenshots are immutable per URL, but the "latest" pointer
+    # changes each step, so a brief cache is safe and cuts re-fetches.
+    return Response(content=content, media_type=content_type, headers={"Cache-Control": "max-age=60"})
 
 
 # --- audio (synthesized voice clips) ----------------------------------------

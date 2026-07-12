@@ -1,14 +1,14 @@
+import { useEffect, useMemo, useState } from 'react'
 import type { Store } from '../store'
+import type { Run } from '../types'
 import { eventMeta } from '../constants'
 import { timeAgo } from '../util'
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { StatusDot, EventIcon } from '../components/ui-kit'
+import { VideoCapture } from '../components/VideoCapture'
+import { LiveAgentViewer, agentSessionFromRun } from '../components/LiveAgentViewer'
+import { api } from '../api'
 import {
   Camera,
   Plug,
@@ -17,6 +17,8 @@ import {
   Check,
   Loader2,
   AlertTriangle,
+  Bot,
+  Sparkles,
 } from 'lucide-react'
 
 export function Overview({ store }: { store: Store }) {
@@ -38,8 +40,15 @@ export function Overview({ store }: { store: Store }) {
     { label: 'Events today', value: String(eventsToday), icon: List },
   ]
 
+  // Run IDs the VideoCapture tile kicked off. We poll them to surface the
+  // spawned agent live, right here in the bento (the "watch it move" box).
+  const [agentRunIds, setAgentRunIds] = useState<string[]>([])
+  const { viewerRun, hero } = useAgentRuns(store, agentRunIds)
+  const agentActive = hero
+
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
+      {/* Stat tiles */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((s) => {
           const Icon = s.icon
@@ -59,8 +68,59 @@ export function Overview({ store }: { store: Store }) {
         })}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
-        <Card>
+      {/* Bento grid. When an agent spawns, its live view takes the hero slot. */}
+      <div className="grid auto-rows-min gap-4 lg:grid-cols-3">
+        {/* Video insertion — upload / live camera / browser camera */}
+        <Card className={agentActive ? 'lg:col-span-1' : 'lg:col-span-2'}>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="size-4 text-primary" /> Insert a video
+            </CardTitle>
+            {(store.live || (viewerRun?.status === 'running')) && (
+              <Badge variant="secondary" className="gap-1.5">
+                <StatusDot status="live" /> live
+              </Badge>
+            )}
+          </CardHeader>
+          <CardContent>
+            <p className="mb-3 text-sm text-muted-foreground">
+              Drop in a clip or connect a camera. We detect what's happening, fire the matching
+              workflow, and the agent that spawns shows up below — you can watch it work.
+            </p>
+            <VideoCapture store={store} onRunsStarted={setAgentRunIds} />
+          </CardContent>
+        </Card>
+
+        {/* Live agent view — the hero when an agent is running */}
+        <Card className={agentActive ? 'lg:col-span-2 lg:row-span-2' : 'lg:col-span-1'}>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <CardTitle className="flex items-center gap-2">
+              <Bot className="size-4" /> Agent activity
+            </CardTitle>
+            {viewerRun && (
+              <Badge
+                variant="outline"
+                className={
+                  viewerRun.status === 'running'
+                    ? 'border-primary/40 text-primary'
+                    : 'border-emerald-500/40 text-emerald-500'
+                }
+              >
+                {viewerRun.status === 'running' ? 'working' : 'done'}
+              </Badge>
+            )}
+          </CardHeader>
+          <CardContent>
+            {viewerRun ? (
+              <AgentBox run={viewerRun} />
+            ) : (
+              <AgentActivityList store={store} useRuns={useRuns} />
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Live event feed */}
+        <Card className="lg:col-span-3">
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle>Live event feed</CardTitle>
             <Badge variant="secondary" className="gap-1.5">
@@ -68,12 +128,18 @@ export function Overview({ store }: { store: Store }) {
               {store.live ? 'streaming' : 'paused'}
             </Badge>
           </CardHeader>
-          <CardContent className="flex flex-col divide-y divide-border/60">
-            {store.events.slice(0, 7).map((e) => {
+          <CardContent className="grid gap-x-8 gap-y-0 sm:grid-cols-2">
+            {store.events.slice(0, 8).map((e) => {
               const m = eventMeta(e.event_type)
               return (
-                <div key={e.event_id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted" style={{ color: m.color }}>
+                <div
+                  key={e.event_id}
+                  className="flex items-center gap-3 border-b border-border/60 py-2.5 last:border-0"
+                >
+                  <div
+                    className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted"
+                    style={{ color: m.color }}
+                  >
                     <EventIcon type={e.event_type} className="size-4" />
                   </div>
                   <div className="min-w-0 flex-1">
@@ -94,64 +160,122 @@ export function Overview({ store }: { store: Store }) {
               )
             })}
             {store.events.length === 0 && (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                No events yet.
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <CardTitle>Agent activity</CardTitle>
-            {useRuns && <Badge variant="secondary">live runs</Badge>}
-          </CardHeader>
-          <CardContent>
-            {useRuns ? (
-              <div className="flex flex-col divide-y divide-border/60">
-                {store.runs.slice(0, 7).map((run) => {
-                  const done = run.steps.filter((s) => s.status === 'done').length
-                  return (
-                    <div key={run.id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
-                      <RunIcon status={run.status} />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium">
-                          {run.workflow_name ?? run.workflow_id}
-                        </div>
-                        <div className="truncate text-xs text-muted-foreground">
-                          {eventMeta(run.event.event_type).label} in {run.event.location}
-                          {' · '}
-                          {done}/{run.steps.length} steps
-                        </div>
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {run.started_at ? timeAgo(run.started_at) : ''}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            ) : store.activity.length === 0 ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                No agent runs yet. Turn on <b>Live</b> to watch workflows fire.
-              </div>
-            ) : (
-              <div className="flex flex-col divide-y divide-border/60">
-                {store.activity.slice(0, 7).map((a) => (
-                  <div key={a.id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
-                    <RunIcon status={a.status === 'running' ? 'running' : 'done'} />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{a.automation}</div>
-                      <div className="truncate text-xs text-muted-foreground">{a.detail}</div>
-                    </div>
-                    <div className="text-xs text-muted-foreground">{timeAgo(a.time)}</div>
-                  </div>
-                ))}
+              <div className="col-span-full py-8 text-center text-sm text-muted-foreground">
+                No events yet. Insert a video above or turn on <b>Live</b>.
               </div>
             )}
           </CardContent>
         </Card>
       </div>
+    </div>
+  )
+}
+
+// Picks the run to feature in the agent viewer: prefer a run this page started,
+// otherwise the most recent run in the store that has an H session to show.
+function useAgentRuns(store: Store, agentRunIds: string[]) {
+  const [tracked, setTracked] = useState<Run[]>([])
+
+  useEffect(() => {
+    if (!agentRunIds.length || !api.configured()) {
+      setTracked([])
+      return
+    }
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const startedAt = Date.now()
+    const maxMs = 300_000
+
+    const tick = async () => {
+      const fetched = await Promise.all(agentRunIds.map((id) => api.getRun(id).catch(() => null)))
+      if (cancelled) return
+      const next = fetched.filter((r): r is Run => !!r)
+      setTracked(next)
+      const allDone = next.length === agentRunIds.length && next.every((r) => r.status !== 'running')
+      if (!allDone && Date.now() - startedAt < maxMs) timer = setTimeout(tick, 2500)
+    }
+    tick()
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [agentRunIds])
+
+  const activeRun = useMemo(
+    () => tracked.find((r) => r.status === 'running') ?? tracked[0] ?? null,
+    [tracked],
+  )
+
+  // The run to feature: one we're tracking with an H session, else the latest
+  // store run that has an agent session (so a run started elsewhere still shows).
+  const viewerRun = useMemo(() => {
+    const candidates = tracked.length ? tracked : store.runs
+    const withSession = candidates.find((r) => agentSessionFromRun(r).sessionId)
+    return withSession ?? null
+  }, [tracked, store.runs])
+
+  // Expand to the big "hero" live view only when the agent is actually active
+  // (a run started from this page, or any run currently running). A stale
+  // completed run still renders in the normal-sized box, without hijacking the
+  // whole grid on page load.
+  const hero = useMemo(
+    () => !!viewerRun && (tracked.length > 0 || viewerRun.status === 'running'),
+    [viewerRun, tracked.length],
+  )
+
+  return { activeRun, viewerRun, hero }
+}
+
+function AgentBox({ run }: { run: Run }) {
+  const { sessionId, viewUrl } = agentSessionFromRun(run)
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="text-xs text-muted-foreground">
+        {run.workflow_name ?? run.workflow_id} ·{' '}
+        {eventMeta(run.event.event_type).label} in {run.event.location}
+      </div>
+      {sessionId ? (
+        <LiveAgentViewer sessionId={sessionId} running={run.status === 'running'} viewUrl={viewUrl} />
+      ) : (
+        <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> Spinning up the agent…
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AgentActivityList({ store, useRuns }: { store: Store; useRuns: boolean }) {
+  if (useRuns) {
+    return (
+      <div className="flex flex-col divide-y divide-border/60">
+        {store.runs.slice(0, 6).map((run) => {
+          const done = run.steps.filter((s) => s.status === 'done').length
+          return (
+            <div key={run.id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+              <RunIcon status={run.status} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium">
+                  {run.workflow_name ?? run.workflow_id}
+                </div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {eventMeta(run.event.event_type).label} in {run.event.location} · {done}/
+                  {run.steps.length} steps
+                </div>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {run.started_at ? timeAgo(run.started_at) : ''}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+  return (
+    <div className="flex flex-col items-center gap-2 py-10 text-center text-sm text-muted-foreground">
+      <Bot className="size-8 opacity-40" />
+      No agent running yet. Insert a video to spawn one, then watch it work here.
     </div>
   )
 }

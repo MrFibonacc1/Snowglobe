@@ -192,3 +192,29 @@ export interface Run {
   finished_at?: string
   steps: RunStep[]
 }
+
+// One movement the H agent made, as surfaced by the automation service's
+// /agent/sessions/{id}/events proxy (see automation/agent_view.py).
+export interface AgentStep {
+  index: number
+  kind: 'action' | 'answer'
+  title: string
+  detail?: string | null
+  // Proxied screenshot path (append to AUTOMATION_URL) the agent saw for this step.
+  screenshot?: string | null
+  cursor?: [number, number] | null
+  viewport?: [number, number] | null
+  url?: string | null
+}
+
+// The live agent-view feed: the agent's screen + an ordered log of its actions.
+export interface AgentFeed {
+  session_id: string
+  status: string
+  latest_screenshot?: string | null
+  cursor?: [number, number] | null
+  viewport?: [number, number] | null
+  url?: string | null
+  steps: AgentStep[]
+  answer?: string | null
+}
