@@ -17,7 +17,7 @@ from steps import execute_step
 # cooldowns, which is fine for a hackathon.
 _last_fire: dict[tuple[str, str], float] = {}
 
-_TEMPLATE_RE = re.compile(r"\{\{\s*event\.([a-zA-Z0-9_.]+)\s*\}\}")
+_TEMPLATE_RE = re.compile(r"\{\{\s*(event|steps)\.([a-zA-Z0-9_.]+)\s*\}\}")
 
 
 def _resolve_path(obj: dict, path: str):
@@ -29,16 +29,21 @@ def _resolve_path(obj: dict, path: str):
     return cur
 
 
-def render(value, event: dict):
-    """Resolve {{event.*}} placeholders in strings, recursively for dict/list."""
+def render(value, event: dict, steps: dict | None = None):
+    """Resolve {{event.*}} and {{steps.<id>.<field>}} placeholders in strings,
+    recursively for dict/list. `steps` maps completed step ids to their output,
+    so later steps can use earlier results — e.g. an agent's answer:
+    "Post to Slack: {{steps.s1.answer}}"."""
+    roots = {"event": event, "steps": steps or {}}
     if isinstance(value, str):
         return _TEMPLATE_RE.sub(
-            lambda m: str(_resolve_path(event, m.group(1)) or ""), value
+            lambda m: str(_resolve_path(roots[m.group(1)], m.group(2)) or ""),
+            value,
         )
     if isinstance(value, dict):
-        return {k: render(v, event) for k, v in value.items()}
+        return {k: render(v, event, steps) for k, v in value.items()}
     if isinstance(value, list):
-        return [render(v, event) for v in value]
+        return [render(v, event, steps) for v in value]
     return value
 
 
@@ -105,7 +110,10 @@ async def execute_run(run: dict, workflow: dict, event: dict) -> None:
         step["started_at"] = datetime.now(timezone.utc).isoformat()
         storage.update_run(run)
 
-        config = render(step_def.get("config", {}), event)
+        steps_ctx = {
+            s["id"]: s.get("output", {}) for s in run["steps"] if s.get("output")
+        }
+        config = render(step_def.get("config", {}), event, steps_ctx)
         try:
             output = await asyncio.to_thread(
                 execute_step, step_def["type"], config, event

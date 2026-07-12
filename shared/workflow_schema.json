@@ -1,16 +1,32 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Snowglobe Workflow",
-  "description": "The contract between the dashboard workflow builder and the automation engine. {{event.*}} placeholders in step config strings are resolved against the triggering event before execution.",
+  "description": "The contract between the dashboard workflow builder and the automation engine. {{event.*}} placeholders in step config strings are resolved against the triggering event; {{steps.<id>.<field>}} resolves against earlier steps' output in the same run (e.g. {{steps.s1.answer}} = the agent's report from step s1).",
   "type": "object",
-  "required": ["id", "name", "enabled", "trigger", "steps"],
+  "required": [
+    "id",
+    "name",
+    "enabled",
+    "trigger",
+    "steps"
+  ],
   "properties": {
-    "id": { "type": "string" },
-    "name": { "type": "string" },
-    "enabled": { "type": "boolean" },
+    "id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean"
+    },
     "trigger": {
       "type": "object",
-      "required": ["event_type", "min_confidence", "cooldown_sec"],
+      "required": [
+        "event_type",
+        "min_confidence",
+        "cooldown_sec"
+      ],
       "properties": {
         "event_type": {
           "type": "string",
@@ -22,7 +38,11 @@
           "type": "string",
           "description": "Optional; omit to match any zone"
         },
-        "min_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "min_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
         "cooldown_sec": {
           "type": "integer",
           "minimum": 0,
@@ -35,12 +55,24 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["id", "type", "config"],
+        "required": [
+          "id",
+          "type",
+          "config"
+        ],
         "properties": {
-          "id": { "type": "string" },
+          "id": {
+            "type": "string"
+          },
           "type": {
             "type": "string",
-            "enum": ["h_agent", "composio", "condition", "voice", "mcp"]
+            "enum": [
+              "h_agent",
+              "composio",
+              "condition",
+              "voice",
+              "mcp"
+            ]
           },
           "config": {
             "type": "object",
