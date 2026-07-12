@@ -63,6 +63,8 @@ import {
   Volume2,
   Wrench,
   Zap,
+  Sparkles,
+  Loader2,
 } from 'lucide-react'
 
 type StepIcon = ComponentType<{ className?: string; size?: number | string }>
@@ -130,6 +132,7 @@ function blankWorkflow(): Workflow {
 export function WorkflowBuilder({ store }: { store: Store }) {
   const [editing, setEditing] = useState<{ wf: Workflow; isNew: boolean } | null>(null)
   const [sendingEvent, setSendingEvent] = useState(false)
+  const [creating, setCreating] = useState(false) // "New workflow" → describe-first dialog
 
   const runTest = async (id: string, name: string) => {
     const runId = await store.testWorkflow(id)
@@ -166,10 +169,7 @@ export function WorkflowBuilder({ store }: { store: Store }) {
         >
           <Zap className="size-4" /> Send test event
         </Button>
-        <Button
-          className="gap-1.5"
-          onClick={() => setEditing({ wf: blankWorkflow(), isNew: true })}
-        >
+        <Button className="gap-1.5" onClick={() => setCreating(true)}>
           <Plus className="size-4" /> New workflow
         </Button>
       </div>
@@ -272,7 +272,106 @@ export function WorkflowBuilder({ store }: { store: Store }) {
       )}
 
       {sendingEvent && <SendTestEventDialog onClose={() => setSendingEvent(false)} />}
+
+      {creating && (
+        <NewWorkflowDialog
+          onClose={() => setCreating(false)}
+          onBuilt={(wf) => {
+            setCreating(false)
+            setEditing({ wf, isNew: true }) // open the AI draft in the builder to review
+          }}
+          onBlank={() => {
+            setCreating(false)
+            setEditing({ wf: blankWorkflow(), isNew: true })
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+function NewWorkflowDialog({
+  onClose,
+  onBuilt,
+  onBlank,
+}: {
+  onClose: () => void
+  onBuilt: (wf: Workflow) => void
+  onBlank: () => void
+}) {
+  const [description, setDescription] = useState('')
+  const [busy, setBusy] = useState(false)
+  const valid = description.trim().length > 0
+
+  const build = async () => {
+    if (!valid || busy) return
+    setBusy(true)
+    try {
+      const draft = await api.generateWorkflow(description.trim())
+      const { _valid, _validation_error, ...wf } = draft
+      void _valid
+      void _validation_error
+      onBuilt(wf as Workflow)
+    } catch {
+      toast.error('Could not build — is the backend running?')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="size-4 text-primary" /> New workflow
+          </DialogTitle>
+          <DialogDescription>
+            Describe what should happen when the cameras detect something — the AI
+            builds the workflow (including what to have the H Company agent do), then
+            opens it in the builder for you to review.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-3 py-1">
+          <Textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) build()
+            }}
+            placeholder="e.g. When there's a spill, have an H agent log the time and location to our Google Doc, then alert #facilities on Slack."
+            rows={4}
+            autoFocus
+          />
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              'When there is a spill, log it to a Google Doc',
+              'If a zone is busy (>30 people), alert staff',
+              "When it's quiet, research supplier prices",
+            ].map((ex) => (
+              <button
+                key={ex}
+                type="button"
+                onClick={() => setDescription(ex)}
+                className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground transition hover:border-primary/50 hover:text-foreground"
+              >
+                {ex}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <DialogFooter className="sm:justify-between">
+          <Button variant="ghost" onClick={onBlank} disabled={busy}>
+            Start from blank
+          </Button>
+          <Button onClick={build} disabled={!valid || busy} className="gap-1.5">
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+            {busy ? 'Building…' : 'Build with AI'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
