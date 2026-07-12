@@ -52,6 +52,36 @@ export interface CameraPayload {
   fps: number
   events: string[]
   mock?: boolean
+  // Route the feed through the go2rtc gateway (perception backend, best-effort).
+  use_gateway?: boolean
+}
+
+// A camera found on the network via ONVIF discovery (GET /discover).
+export interface DiscoveredCamera {
+  name?: string
+  ip: string
+  xaddr: string
+  manufacturer?: string
+  model?: string
+}
+
+// Response of GET /discover (best-effort; cameras may be empty).
+export interface DiscoverResponse {
+  cameras: DiscoveredCamera[]
+}
+
+// Body for POST /discover/resolve — turns a discovered camera + creds into an
+// rtsp URL.
+export interface ResolveCameraRequest {
+  xaddr: string
+  username: string
+  password: string
+  profile_index?: number
+}
+
+// Response of POST /discover/resolve.
+export interface ResolveCameraResponse {
+  rtsp_url: string
 }
 
 export type IntegrationCategory =

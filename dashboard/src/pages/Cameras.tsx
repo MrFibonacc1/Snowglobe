@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import type { NewCamera, Store } from '../store'
-import type { Camera, CameraSource, EventType } from '../types'
-import { cameraSnapshotUrl } from '../api'
+import type { Camera, CameraSource, DiscoveredCamera, EventType } from '../types'
+import { cameraSnapshotUrl, discoverCameras, resolveCamera } from '../api'
 import { SUGGESTED_EVENT_TYPES, eventMeta, SOURCE_LABEL } from '../constants'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Slider } from '@/components/ui/slider'
+import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import {
   Dialog,
@@ -20,7 +21,7 @@ import {
 } from '@/components/ui/dialog'
 import { StatusDot, EventIcon } from '../components/ui-kit'
 import { cn } from '@/lib/utils'
-import { Plus, Trash2, Camera as CameraIcon } from 'lucide-react'
+import { Plus, Trash2, Camera as CameraIcon, Radar, Loader2, ChevronLeft } from 'lucide-react'
 
 const SOURCES: { id: CameraSource; d: string }[] = [
   { id: 'webcam', d: 'This machine' },
@@ -188,6 +189,13 @@ function CameraCard({ cam, store }: { cam: Camera; store: Store }) {
   )
 }
 
+// Build a human name for a discovered camera from whatever ONVIF returned.
+function discoveredName(c: DiscoveredCamera): string {
+  if (c.name?.trim()) return c.name.trim()
+  const make = [c.manufacturer, c.model].filter(Boolean).join(' ').trim()
+  return make ? `${make} (${c.ip})` : c.ip
+}
+
 function AddCameraDialog({
   onClose,
   onAdd,
@@ -201,9 +209,21 @@ function AddCameraDialog({
   const [url, setUrl] = useState('')
   const [detects, setDetects] = useState<EventType[]>([])
   const [customType, setCustomType] = useState('')
+  const [useGateway, setUseGateway] = useState(true)
+
+  // ONVIF discovery state.
+  const [scanning, setScanning] = useState(false)
+  const [scanned, setScanned] = useState(false)
+  const [discovered, setDiscovered] = useState<DiscoveredCamera[]>([])
+  // When set, the dialog is in the "credentials" step for a discovered camera.
+  const [picked, setPicked] = useState<DiscoveredCamera | null>(null)
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [resolving, setResolving] = useState(false)
 
   const needsUrl = source === 'rtsp' || source === 'hls'
   const valid = name.trim() && zone.trim() && (!needsUrl || url.trim())
+  const credsValid = name.trim() && zone.trim() && username.trim()
 
   const toggle = (t: EventType) =>
     setDetects((d) => (d.includes(t) ? d.filter((x) => x !== t) : [...d, t]))
@@ -217,117 +237,306 @@ function AddCameraDialog({
     setCustomType('')
   }
 
+  const scan = async () => {
+    setScanning(true)
+    setScanned(false)
+    try {
+      const found = await discoverCameras()
+      setDiscovered(found)
+    } finally {
+      setScanning(false)
+      setScanned(true)
+    }
+  }
+
+  const pick = (c: DiscoveredCamera) => {
+    setPicked(c)
+    setName(discoveredName(c))
+    setUsername('')
+    setPassword('')
+  }
+
+  const backToScan = () => {
+    setPicked(null)
+    setName('')
+  }
+
+  const connectResolved = async () => {
+    if (!picked || !credsValid || resolving) return
+    setResolving(true)
+    try {
+      const { rtsp_url } = await resolveCamera({
+        xaddr: picked.xaddr,
+        username: username.trim(),
+        password,
+      })
+      onAdd({
+        name: name.trim(),
+        zone: zone.trim(),
+        source: 'rtsp',
+        url: rtsp_url,
+        fps: 1,
+        detects,
+        use_gateway: true,
+      })
+    } catch (e) {
+      // Keep the dialog open so the user doesn't lose their input.
+      toast.error('Could not resolve camera stream', {
+        description:
+          e instanceof Error ? e.message : 'Check the username/password and that the camera is reachable.',
+      })
+    } finally {
+      setResolving(false)
+    }
+  }
+
+  // Shared event-type picker used by both the manual form and credentials step.
+  const eventPicker = (
+    <div className="flex flex-col gap-2">
+      <Label>Watch for specific events (optional)</Label>
+      <div className="flex flex-wrap gap-1.5">
+        {[...new Set([...SUGGESTED_EVENT_TYPES, ...detects])].map((t) => (
+          <PillToggle key={t} selected={detects.includes(t)} onClick={() => toggle(t)}>
+            <EventIcon type={t} className="size-3.5" /> {eventMeta(t).label}
+          </PillToggle>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <Input
+          value={customType}
+          onChange={(e) => setCustomType(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              addCustom()
+            }
+          }}
+          placeholder="add a custom event, e.g. blocked_exit"
+        />
+        <Button type="button" variant="secondary" onClick={addCustom}>
+          Add
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Leave empty for open-ended discovery — the perception model surfaces and names any
+        actionable event on its own.
+      </p>
+    </div>
+  )
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Connect a camera</DialogTitle>
+          <DialogTitle>{picked ? 'Camera credentials' : 'Connect a camera'}</DialogTitle>
           <DialogDescription>
-            Add a video source. Detections stream into the event feed at the sampled frame rate.
+            {picked
+              ? 'Enter the camera login. We resolve its RTSP stream and route it through the gateway.'
+              : 'Add a video source. Detections stream into the event feed at the sampled frame rate.'}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-4 py-2">
-          <div className="flex flex-col gap-2">
-            <Label>Source type</Label>
-            <div className="grid grid-cols-2 gap-2">
-              {SOURCES.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  className={cn(
-                    'rounded-lg border p-3 text-left transition-colors',
-                    source === s.id
-                      ? 'border-primary bg-primary/10'
-                      : 'hover:bg-accent',
-                  )}
-                  onClick={() => setSource(s.id)}
-                >
-                  <div className="text-sm font-medium">{SOURCE_LABEL[s.id]}</div>
-                  <div className="text-xs text-muted-foreground">{s.d}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <Field label="Camera name">
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Loading Bay East"
-              autoFocus
-            />
-          </Field>
-
-          {needsUrl && (
-            <Field
-              label="Stream URL"
-              hint="Perception samples this feed at ~0.3 fps (one frame every ~3s) and sends frames to the Cosmos 3 Reasoner."
+        {picked ? (
+          // --- Credentials step for a discovered camera ---------------------
+          <div className="flex flex-col gap-4 py-2">
+            <button
+              type="button"
+              onClick={backToScan}
+              className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
             >
+              <ChevronLeft className="size-3.5" /> Back to scan results
+            </button>
+
+            <div className="rounded-lg border bg-muted/40 p-3 text-sm">
+              <div className="font-medium">{discoveredName(picked)}</div>
+              <div className="text-xs text-muted-foreground">
+                {picked.ip}
+                {picked.manufacturer ? ` · ${picked.manufacturer}` : ''}
+                {picked.model ? ` ${picked.model}` : ''}
+              </div>
+            </div>
+
+            <Field label="Camera name">
+              <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+            </Field>
+
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Username">
+                <Input
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="admin"
+                  autoComplete="off"
+                />
+              </Field>
+              <Field label="Password">
+                <Input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  autoComplete="off"
+                />
+              </Field>
+            </div>
+
+            <Field label="Zone" hint="Used to route events to zone-scoped automations.">
+              <Input value={zone} onChange={(e) => setZone(e.target.value)} placeholder="zone_a" />
+            </Field>
+
+            {eventPicker}
+          </div>
+        ) : (
+          // --- Manual form + network scan -----------------------------------
+          <div className="flex flex-col gap-4 py-2">
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <Label>Scan for cameras</Label>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={scan}
+                  disabled={scanning}
+                  className="gap-1.5"
+                >
+                  {scanning ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Radar className="size-4" />
+                  )}
+                  {scanning ? 'Scanning…' : 'Scan network'}
+                </Button>
+              </div>
+              {scanning && (
+                <p className="text-xs text-muted-foreground">
+                  Looking for ONVIF cameras on the local network…
+                </p>
+              )}
+              {!scanning && discovered.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  {discovered.map((c) => (
+                    <button
+                      key={c.xaddr}
+                      type="button"
+                      onClick={() => pick(c)}
+                      className="flex items-center justify-between rounded-lg border p-2.5 text-left transition-colors hover:bg-accent"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">{discoveredName(c)}</div>
+                        <div className="truncate text-xs text-muted-foreground">
+                          {c.ip}
+                          {c.manufacturer ? ` · ${c.manufacturer}` : ''}
+                          {c.model ? ` ${c.model}` : ''}
+                        </div>
+                      </div>
+                      <CameraIcon className="size-4 shrink-0 text-muted-foreground" />
+                    </button>
+                  ))}
+                </div>
+              )}
+              {!scanning && scanned && discovered.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No cameras found — enter a URL manually below.
+                </p>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label>Source type</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {SOURCES.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    className={cn(
+                      'rounded-lg border p-3 text-left transition-colors',
+                      source === s.id ? 'border-primary bg-primary/10' : 'hover:bg-accent',
+                    )}
+                    onClick={() => setSource(s.id)}
+                  >
+                    <div className="text-sm font-medium">{SOURCE_LABEL[s.id]}</div>
+                    <div className="text-xs text-muted-foreground">{s.d}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <Field label="Camera name">
               <Input
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder={source === 'rtsp' ? 'rtsp://10.0.0.20/stream1' : 'https://…/index.m3u8'}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Loading Bay East"
               />
             </Field>
-          )}
 
-          <Field label="Zone" hint="Used to route events to zone-scoped automations.">
-            <Input value={zone} onChange={(e) => setZone(e.target.value)} placeholder="zone_a" />
-          </Field>
+            {needsUrl && (
+              <>
+                <Field
+                  label="Stream URL"
+                  hint="Perception samples this feed at ~0.3 fps (one frame every ~3s) and sends frames to the Cosmos 3 Reasoner."
+                >
+                  <Input
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder={
+                      source === 'rtsp' ? 'rtsp://10.0.0.20/stream1' : 'https://…/index.m3u8'
+                    }
+                  />
+                </Field>
 
-          <div className="flex flex-col gap-2">
-            <Label>Watch for specific events (optional)</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {[...new Set([...SUGGESTED_EVENT_TYPES, ...detects])].map((t) => (
-                <PillToggle key={t} selected={detects.includes(t)} onClick={() => toggle(t)}>
-                  <EventIcon type={t} className="size-3.5" /> {eventMeta(t).label}
-                </PillToggle>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <Input
-                value={customType}
-                onChange={(e) => setCustomType(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    addCustom()
-                  }
-                }}
-                placeholder="add a custom event, e.g. blocked_exit"
-              />
-              <Button type="button" variant="secondary" onClick={addCustom}>
-                Add
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Leave empty for open-ended discovery — the perception model
-              surfaces and names any actionable event on its own.
-            </p>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex flex-col">
+                    <Label>Route through gateway (go2rtc)</Label>
+                    <span className="text-xs text-muted-foreground">
+                      Restreams the feed for lower-latency, more reliable sampling.
+                    </span>
+                  </div>
+                  <Switch
+                    checked={useGateway}
+                    onCheckedChange={setUseGateway}
+                    aria-label="Route through gateway"
+                  />
+                </div>
+              </>
+            )}
+
+            <Field label="Zone" hint="Used to route events to zone-scoped automations.">
+              <Input value={zone} onChange={(e) => setZone(e.target.value)} placeholder="zone_a" />
+            </Field>
+
+            {eventPicker}
           </div>
-        </div>
+        )}
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button
-            disabled={!valid}
-            onClick={() =>
-              valid &&
-              onAdd({
-                name: name.trim(),
-                zone: zone.trim(),
-                source,
-                url: needsUrl ? url.trim() : undefined,
-                fps: 1,
-                detects,
-              })
-            }
-          >
-            Connect
-          </Button>
+          {picked ? (
+            <Button disabled={!credsValid || resolving} onClick={connectResolved} className="gap-1.5">
+              {resolving && <Loader2 className="size-4 animate-spin" />}
+              {resolving ? 'Resolving…' : 'Connect'}
+            </Button>
+          ) : (
+            <Button
+              disabled={!valid}
+              onClick={() =>
+                valid &&
+                onAdd({
+                  name: name.trim(),
+                  zone: zone.trim(),
+                  source,
+                  url: needsUrl ? url.trim() : undefined,
+                  fps: 1,
+                  detects,
+                  ...(needsUrl ? { use_gateway: useGateway } : {}),
+                })
+              }
+            >
+              Connect
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

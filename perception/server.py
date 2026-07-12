@@ -12,10 +12,13 @@ from __future__ import annotations
 
 import base64
 import os
+import sys
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from uuid import uuid4
 
 import cv2
 import numpy as np
@@ -25,6 +28,8 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from . import emit as emit_mod
+from . import gateway
+from . import onvif as onvif_mod
 from . import vlm as vlm_mod
 from .capture import CameraRegistry
 from .config import Config
@@ -41,6 +46,12 @@ app.add_middleware(
 _cfg = Config.from_env()
 _detectors: dict[bool, object] = {}
 _cameras = CameraRegistry(_cfg)
+
+# Maps a camera id → the unique go2rtc stream key it was registered under, so
+# delete can unregister the exact stream (not one derived from the display name,
+# which could collide with another camera). Guarded by `_gateway_streams_lock`.
+_gateway_streams: dict[str, str] = {}
+_gateway_streams_lock = threading.Lock()
 
 
 @app.on_event("shutdown")
@@ -320,20 +331,67 @@ class CameraCreate(BaseModel):
     events: list[str] = []
     mock: bool = False
     automation_url: str | None = None  # optional override; defaults to Config
+    # Tri-state routing control:
+    #   True  → always front the source with go2rtc (falls back if it's down),
+    #   False → never (direct sampling, the legacy path),
+    #   None  → auto: route network URLs through go2rtc when it's reachable.
+    use_gateway: bool | None = None
+
+
+def _is_network_source(source: str) -> bool:
+    """A source the sampler reaches over the network (vs a local webcam/file)."""
+    return source.lower().startswith(("rtsp://", "http://", "https://", "onvif://"))
 
 
 @app.post("/cameras", status_code=201)
 def create_camera(body: CameraCreate):
-    """Create and start a live-capture worker; returns its state object."""
-    return _cameras.create(
+    """Create and start a live-capture worker; returns its state object.
+
+    When gateway routing applies, the worker samples the normalized go2rtc RTSP
+    stream while the original request source is preserved as ``origin`` for
+    display. Local devices (webcam / index / file) stay direct unless the caller
+    explicitly opts in with ``use_gateway=True``.
+    """
+    # Route through go2rtc when explicitly requested, or (auto) for network URLs.
+    # Local devices only route on an explicit opt-in.
+    should_route = body.use_gateway is True or (
+        body.use_gateway is None and _is_network_source(body.source)
+    )
+
+    sample_source = body.source
+    origin = None
+    stream_key = None
+    # available() is only consulted when routing is on the table, so the direct
+    # path stays untouched when go2rtc isn't in play. If routing was wanted but
+    # go2rtc is unreachable — or the PUT itself fails — fall back to the direct
+    # source (best-effort). The stream is keyed on a unique id, not the display
+    # name, so two cameras with the same name don't collide/cross-delete.
+    if should_route and gateway.available():
+        candidate_key = f"{gateway.slug(body.name)}-{uuid4().hex[:6]}"
+        normalized = gateway.register(candidate_key, body.source)
+        if normalized is not None:
+            sample_source = normalized
+            origin = body.source
+            stream_key = candidate_key
+
+    state = _cameras.create(
         name=body.name,
-        source=body.source,
+        source=sample_source,
         zone=body.zone,
         fps=body.fps,
         events=body.events,
         mock=body.mock,
         automation_url=body.automation_url,
+        origin=origin,
     )
+
+    # Record the mapping only for cameras we actually routed, so delete can
+    # unregister the exact stream key.
+    if stream_key is not None:
+        with _gateway_streams_lock:
+            _gateway_streams[state["id"]] = stream_key
+
+    return state
 
 
 @app.get("/cameras")
@@ -369,6 +427,13 @@ def resume_camera(cam_id: str):
 def delete_camera(cam_id: str):
     if not _cameras.delete(cam_id):
         raise HTTPException(status_code=404, detail="unknown camera")
+    # Unregister the exact go2rtc stream this camera was routed through (keyed on
+    # its unique id, not the display name, so we never touch another camera's
+    # stream). Only routed cameras have a mapping entry.
+    with _gateway_streams_lock:
+        stream_key = _gateway_streams.pop(cam_id, None)
+    if stream_key is not None:
+        gateway.unregister(stream_key)  # best-effort; never raises
     return Response(status_code=204)
 
 
@@ -380,6 +445,40 @@ def camera_latest(cam_id: str):
     if jpeg is None:
         raise HTTPException(status_code=404, detail="no frame sampled yet")
     return Response(content=jpeg, media_type="image/jpeg")
+
+
+class ResolveRequest(BaseModel):
+    """Request body for POST /discover/resolve."""
+
+    xaddr: str
+    username: str
+    password: str
+    profile_index: int = 0
+
+
+@app.get("/discover")
+def discover_cameras(timeout: float = 4.0):
+    """WS-Discovery probe for ONVIF cameras on the LAN. Best-effort: missing
+    ONVIF deps or an empty LAN both yield {"cameras": []} — never a 500."""
+    try:
+        cameras = onvif_mod.discover(timeout)
+    except Exception as e:  # optional deps / probe failure — degrade to empty
+        print(f"  ! /discover failed: {e}", file=sys.stderr)
+        cameras = []
+    return {"cameras": cameras}
+
+
+@app.post("/discover/resolve")
+def resolve_camera(body: ResolveRequest):
+    """Resolve an ONVIF camera's RTSP URL (creds embedded) via GetStreamUri.
+    Bad creds / unreachable host / missing ONVIF deps → 400 with a detail."""
+    try:
+        rtsp_url = onvif_mod.resolve_stream(
+            body.xaddr, body.username, body.password, body.profile_index
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"could not resolve stream: {e}")
+    return {"rtsp_url": rtsp_url}
 
 
 def main():
