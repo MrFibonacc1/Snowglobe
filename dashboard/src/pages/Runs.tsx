@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import type { Store } from '../store'
 import type { Run, RunStep } from '../types'
 import { eventMeta } from '../constants'
@@ -6,9 +7,9 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { StatusDot, EventIcon, GroundingBadge } from '../components/ui-kit'
 import { cn } from '@/lib/utils'
-import { Check, Loader2, ExternalLink } from 'lucide-react'
+import { Check, Loader2, ExternalLink, ChevronLeft } from 'lucide-react'
 
-export function Runs({ store }: { store: Store }) {
+export function Runs({ store, onOpenRun }: { store: Store; onOpenRun?: (id: string) => void }) {
   const runs = store.runs
 
   return (
@@ -40,7 +41,7 @@ export function Runs({ store }: { store: Store }) {
       ) : (
         <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           {runs.map((run) => (
-            <RunCard key={run.id} run={run} />
+            <RunCard key={run.id} run={run} onOpen={onOpenRun && (() => onOpenRun(run.id))} />
           ))}
         </div>
       )}
@@ -48,10 +49,13 @@ export function Runs({ store }: { store: Store }) {
   )
 }
 
-function RunCard({ run }: { run: Run }) {
+function RunCard({ run, onOpen }: { run: Run; onOpen?: () => void }) {
   const m = eventMeta(run.event.event_type)
   return (
-    <Card>
+    <Card
+      className={onOpen ? 'cursor-pointer transition hover:border-primary/50 hover:shadow-sm' : undefined}
+      onClick={onOpen}
+    >
       <CardContent className="flex flex-col gap-4">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2.5">
@@ -102,7 +106,14 @@ function RunStatusBadge({ status }: { status: string }) {
 
 function StepRow({ step, last }: { step: RunStep; last: boolean }) {
   const out = step.output ?? {}
-  const replay = (out.agent_view_url as string) || (out.replay_url as string) || null
+  // Prefer H's console session viewer — the visual, step-by-step browser replay.
+  // The raw agent_view_url from share_session returns JSON, not the player, so
+  // build the console URL from the session id when we have one (needs the
+  // owner's H login, which is fine for our own dashboard).
+  const sessionId = out.session_id as string | undefined
+  const replay = sessionId
+    ? `https://platform.hcompany.ai/agents/sessions/${sessionId}`
+    : (out.agent_view_url as string) || (out.replay_url as string) || null
   return (
     <div className="flex gap-3">
       <div className="flex flex-col items-center">
@@ -126,6 +137,7 @@ function StepRow({ step, last }: { step: RunStep; last: boolean }) {
             href={replay}
             target="_blank"
             rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
           >
             <ExternalLink className="size-3" /> View agent replay
           </a>
@@ -258,4 +270,146 @@ function durationMs(start: string, end: string): string {
   const ms = new Date(end).getTime() - new Date(start).getTime()
   if (ms < 1000) return `${ms}ms`
   return `${(ms / 1000).toFixed(1)}s`
+}
+
+export function RunDetail({
+  run,
+  onBack,
+  onRefresh,
+}: {
+  run: Run | undefined
+  onBack: () => void
+  onRefresh?: () => void
+}) {
+  // While the run is still executing, refresh it on its own cadence — the
+  // global feed only polls when "Live" is on, but a detail page should update
+  // regardless so the session link and step progress appear as they happen.
+  const running = run?.status === 'running'
+  useEffect(() => {
+    if (!running || !onRefresh) return
+    const t = setInterval(onRefresh, 3000)
+    return () => clearInterval(t)
+  }, [running, onRefresh])
+
+  const back = (
+    <button
+      onClick={onBack}
+      className="inline-flex items-center gap-1 self-start rounded-sm text-sm text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <ChevronLeft className="size-4" /> Back to runs
+    </button>
+  )
+
+  if (!run) {
+    return (
+      <div className="flex flex-col gap-4">
+        {back}
+        <div className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">
+          Run not found — it may have scrolled out of the recent list.
+        </div>
+      </div>
+    )
+  }
+
+  const m = eventMeta(run.event.event_type)
+  const sessionId = run.steps
+    .map((s) => (s.output as Record<string, unknown> | undefined)?.session_id as string | undefined)
+    .find(Boolean)
+  const replay = sessionId ? `https://platform.hcompany.ai/agents/sessions/${sessionId}` : null
+  // Target links the run touched — the pages the agent navigated to and changed
+  // (h_agent `url`) or the MCP endpoint it called (`server_url`).
+  const affected: string[] = []
+  for (const s of run.steps) {
+    const o = (s.output ?? {}) as Record<string, unknown>
+    for (const key of ['url', 'server_url'] as const) {
+      const v = o[key]
+      if (typeof v === 'string' && v && !affected.includes(v)) affected.push(v)
+    }
+  }
+  const meta: [string, string][] = [
+    ['Started', run.started_at ? timeAgo(run.started_at) : '—'],
+    ['Duration', run.started_at && run.finished_at ? durationMs(run.started_at, run.finished_at) : run.status === 'running' ? 'running…' : '—'],
+    ['Event', run.event.event_id],
+    ['Run', run.id],
+  ]
+
+  return (
+    <div className="flex flex-col gap-4">
+      {back}
+      <Card>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-3">
+              <span className="flex size-11 shrink-0 items-center justify-center rounded-md bg-muted" style={{ color: m?.color }}>
+                <EventIcon type={run.event.event_type} className="size-5" />
+              </span>
+              <div>
+                <div className="text-base font-semibold">{run.workflow_name ?? run.workflow_id}</div>
+                <div className="text-sm text-muted-foreground">
+                  {m?.label ?? run.event.event_type} in {run.event.location}
+                  {typeof run.event.payload?.detail === 'string' && ` · ${run.event.payload.detail}`}
+                </div>
+                <div className="mt-1.5">
+                  <GroundingBadge payload={run.event.payload} confidence={run.event.confidence} />
+                </div>
+              </div>
+            </div>
+            <RunStatusBadge status={run.status} />
+          </div>
+
+          {replay && (
+            <a
+              href={replay}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex w-fit items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
+            >
+              <ExternalLink className="size-4" /> Watch agent session (H replay)
+            </a>
+          )}
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {meta.map(([label, value]) => (
+              <div key={label} className="rounded-md bg-muted/40 px-3 py-2">
+                <div className="text-xs text-muted-foreground">{label}</div>
+                <div className="truncate font-mono text-xs">{value}</div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {affected.length > 0 && (
+        <Card>
+          <CardContent className="flex flex-col gap-2">
+            <div className="text-sm font-semibold">Links this run touched</div>
+            <p className="text-xs text-muted-foreground">
+              Pages the agent navigated to and changed — open to verify the result.
+            </p>
+            {affected.map((url) => (
+              <a
+                key={url}
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm text-primary transition hover:border-primary/50 hover:underline"
+              >
+                <ExternalLink className="size-3.5 shrink-0" />
+                <span className="truncate">{url}</span>
+              </a>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardContent className="flex flex-col gap-0">
+          <div className="mb-3 text-sm font-semibold">Steps</div>
+          {run.steps.map((step, i) => (
+            <StepRow key={step.id} step={step} last={i === run.steps.length - 1} />
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  )
 }

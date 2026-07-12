@@ -16,7 +16,7 @@ import { Cameras } from './pages/Cameras'
 import { Integrations } from './pages/Integrations'
 import { WorkflowBuilder } from './pages/WorkflowBuilder'
 import { Assistant } from './pages/Assistant'
-import { Runs } from './pages/Runs'
+import { Runs, RunDetail } from './pages/Runs'
 import { Events } from './pages/Events'
 import { Testing } from './pages/Testing'
 import { Loader2 } from 'lucide-react'
@@ -49,9 +49,15 @@ function readInitialView(): View {
 export default function App() {
   const store = useStore()
   const [view, setView] = useState<View>(readInitialView)
-  const { title, sub } = TITLES[view]
+  // A selected run overlays a detail page on top of whichever view is active.
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const selectedRun = selectedRunId ? store.runs.find((r) => r.id === selectedRunId) : undefined
+  const { title, sub } = selectedRunId
+    ? { title: 'Run detail', sub: 'Full step-by-step execution and agent session' }
+    : TITLES[view]
 
   const setViewWithStorage = (nextView: View) => {
+    setSelectedRunId(null) // leaving to a nav item closes the run detail
     try {
       localStorage.setItem(VIEW_KEY, nextView)
     } catch {
@@ -106,14 +112,20 @@ export default function App() {
         </header>
 
         <main className="flex-1 p-4 md:p-6">
-          {view === 'overview' && <Overview store={store} />}
-          {view === 'assistant' && <Assistant store={store} onNavigate={setViewWithStorage} />}
-          {view === 'cameras' && <Cameras store={store} />}
-          {view === 'integrations' && <Integrations store={store} />}
-          {view === 'automations' && <WorkflowBuilder store={store} />}
-          {view === 'runs' && <Runs store={store} />}
-          {view === 'events' && <Events store={store} />}
-          {view === 'testing' && <Testing store={store} />}
+          {selectedRunId ? (
+            <RunDetail run={selectedRun} onBack={() => setSelectedRunId(null)} onRefresh={store.refreshRuns} />
+          ) : (
+            <>
+              {view === 'overview' && <Overview store={store} onOpenRun={setSelectedRunId} />}
+              {view === 'assistant' && <Assistant store={store} onNavigate={setViewWithStorage} />}
+              {view === 'cameras' && <Cameras store={store} />}
+              {view === 'integrations' && <Integrations store={store} />}
+              {view === 'automations' && <WorkflowBuilder store={store} />}
+              {view === 'runs' && <Runs store={store} onOpenRun={setSelectedRunId} />}
+              {view === 'events' && <Events store={store} />}
+              {view === 'testing' && <Testing store={store} />}
+            </>
+          )}
         </main>
       </SidebarInset>
       <Toaster />

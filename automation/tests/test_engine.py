@@ -99,6 +99,36 @@ class EngineAgentFailureTests(unittest.TestCase):
         self.assertEqual(run["steps"][1]["status"], "skipped")
 
 
+class ProgressTests(unittest.TestCase):
+    def test_session_id_persisted_while_step_still_running(self):
+        # An h_agent step reports its session id mid-run via on_progress; the
+        # engine must persist it before the step finishes so the run card can
+        # link the live replay.
+        event = {"event_id": "e", "event_type": "spill", "location": "z", "confidence": 0.9}
+        workflow = {
+            "id": "wf", "name": "n", "enabled": True,
+            "trigger": {"event_type": "spill", "min_confidence": 0.5},
+            "steps": [{"id": "s1", "type": "h_agent", "config": {}}],
+        }
+        run = engine._new_run(workflow, event)
+        snapshots = []
+
+        def fake_execute_step(step_type, config, ev, on_progress=None):
+            on_progress({"session_id": "sess-abc", "status": "running"})
+            return {"backend": "agent_mcp", "session_id": "sess-abc", "answer": "done"}
+
+        with patch.object(engine, "execute_step", side_effect=fake_execute_step), patch.object(
+            engine.storage, "update_run",
+            side_effect=lambda r: snapshots.append(
+                (r["steps"][0]["status"], (r["steps"][0].get("output") or {}).get("session_id"))
+            ),
+        ):
+            asyncio.run(engine.execute_run(run, workflow, event))
+
+        self.assertTrue(any(st == "running" and sid == "sess-abc" for st, sid in snapshots))
+        self.assertEqual(run["status"], "done")
+
+
 class RenderTests(unittest.TestCase):
     def test_falsy_values_render_as_themselves(self):
         # Regression: a quiet-night count of 0 (or 0.0 / False) must not
