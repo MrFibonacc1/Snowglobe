@@ -10,6 +10,7 @@ import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { PillToggle } from './Cameras'
+import { ManualEvents } from './ManualEvents'
 import { ConfidenceBar, EventIcon } from '../components/ui-kit'
 import { Upload, Check, Loader2, ShieldCheck, ShieldAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -694,6 +695,7 @@ export function Testing({ store }: { store: Store }) {
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
+      <ManualEvents store={store} />
       {/* Left: upload + controls */}
       <Card>
         <CardContent className="flex flex-col gap-4">
