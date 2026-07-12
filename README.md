@@ -67,7 +67,7 @@ execute against the live services.
 
 ```
 video
-  -> frame sampler (~0.3 fps)
+  -> frame sampler (~2 fps)
   -> NVIDIA vision reasoner on NIM
   -> event normalizer + local YOLO grounding
   -> POST /events

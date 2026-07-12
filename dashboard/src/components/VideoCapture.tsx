@@ -8,7 +8,8 @@ import { EventIcon } from './ui-kit'
 import { Upload, Loader2, Video, Camera as CameraIcon, Play, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api, cameraSnapshotUrl } from '../api'
-import { LiveCameraStream } from './LiveCameraStream'
+import { LiveCameraStream, type LiveDetectionBox } from './LiveCameraStream'
+import { DetectionOverlay } from './DetectionOverlay'
 
 const PERCEPTION_URL =
   (import.meta.env.VITE_PERCEPTION_URL as string | undefined) ?? 'http://localhost:8008'
@@ -19,6 +20,11 @@ interface DetectResult {
   model: string
   mock: boolean
   frames_analyzed?: number
+  objects?: Array<{
+    phrase: string
+    confidence: number
+    boxes: number[][]
+  }>
   events?: Record<string, unknown>[]
 }
 
@@ -47,6 +53,7 @@ export function VideoCapture({
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const [liveStreaming, setLiveStreaming] = useState(false)
+  const [liveBoxes, setLiveBoxes] = useState<LiveDetectionBox[]>([])
   const latestMjpegFrameRef = useRef<Blob | null>(null)
   const analyzedMjpegFrameRef = useRef<Blob | null>(null)
 
@@ -79,8 +86,13 @@ export function VideoCapture({
     if (cameraId && !liveCameras.some((camera) => camera.id === cameraId)) {
       setCameraId(liveCameras[0]?.id ?? '')
       setLiveStreaming(false)
+      setLiveBoxes([])
     }
   }, [cameraId, liveCameras])
+
+  useEffect(() => {
+    setLiveBoxes([])
+  }, [cameraId])
 
   const receiveMjpegFrame = useCallback((blob: Blob) => {
     latestMjpegFrameRef.current = blob
@@ -183,17 +195,19 @@ export function VideoCapture({
           body: fd,
           signal: AbortSignal.timeout(targetIsVideo ? 60000 : DETECT_TIMEOUT_MS),
         })
-        if (!res.ok) throw new Error(`detect API returned ${res.status}`)
+        if (!res.ok) {
+          const failure = await res.json().catch(() => ({})) as { error?: string; detail?: string }
+          throw new Error(failure.error || failure.detail || `Detection failed with HTTP ${res.status}`)
+        }
         const payload = (await res.json()) as DetectResult
+        if (live) setLiveBoxes(parseLiveBoxes(payload.objects ?? []))
         const events = parseEvents(payload.events ?? [])
         setLastEvents(events)
-        setSummary(
-          events.length
-            ? `Detected ${events.length} event${events.length > 1 ? 's' : ''}${
-                payload.mock ? ' (mock model)' : ''
-              }`
-            : 'No actionable events found.',
-        )
+        setSummary(events.length
+          ? `Detected ${events.length} event${events.length > 1 ? 's' : ''}${payload.mock ? ' (mock model)' : ''}`
+          : live
+            ? `Monitoring · ${(payload.objects ?? []).reduce((n, object) => n + object.boxes.length, 0)} objects tracked`
+            : 'No actionable events found.')
         if (events.length) {
           store.ingestEvents(events)
           if (api.configured()) {
@@ -212,11 +226,15 @@ export function VideoCapture({
           }
         }
       } catch (e) {
-        setError(
-          e instanceof Error && e.name === 'TimeoutError'
-            ? 'The vision model timed out. Try a shorter clip or a single frame.'
-            : `Could not reach the perception service at ${PERCEPTION_URL}. Start it with: python -m perception.server`,
-        )
+        if (e instanceof Error && e.name === 'TimeoutError') {
+          setError(live
+            ? 'Vision analysis timed out. Retrying with the next frame…'
+            : 'The vision model timed out. Try a shorter clip or a single frame.')
+        } else if (e instanceof TypeError) {
+          setError(`Could not reach the perception service at ${PERCEPTION_URL}. Start it with: python -m perception.server`)
+        } else {
+          setError(`${e instanceof Error ? e.message : 'Detection failed'}. Retrying with the next frame…`)
+        }
       } finally {
         setBusy(false)
       }
@@ -306,7 +324,8 @@ export function VideoCapture({
         role="button"
         tabIndex={preview || browserStream || liveStreaming ? -1 : 0}
         className={cn(
-          'relative flex min-h-48 cursor-pointer items-center justify-center overflow-hidden rounded-lg border-2 border-dashed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'relative flex cursor-pointer items-center justify-center overflow-hidden rounded-lg border-2 border-dashed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          preview || browserStream || liveStreaming ? 'min-h-0' : 'min-h-48',
           dragging ? 'border-primary bg-primary/5' : 'hover:border-muted-foreground/40',
         )}
         onClick={() => !preview && !browserStream && !liveStreaming && inputRef.current?.click()}
@@ -328,16 +347,19 @@ export function VideoCapture({
         }}
       >
         {liveStreaming && cameraId ? (
-          <LiveCameraStream cameraId={cameraId} onFrame={receiveMjpegFrame} />
+          <LiveCameraStream cameraId={cameraId} onFrame={receiveMjpegFrame} boxes={liveBoxes} />
         ) : browserStream ? (
-          <video
-            ref={videoRef}
-            autoPlay
-            muted
-            playsInline
-            data-testid="browser-camera-preview"
-            className="max-h-64 w-full object-contain"
-          />
+          <div className="relative mx-auto flex w-fit max-w-full justify-center overflow-hidden rounded-md">
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
+              data-testid="browser-camera-preview"
+              className="block max-h-72 max-w-full object-contain"
+            />
+            <DetectionOverlay mediaRef={videoRef} boxes={liveBoxes} />
+          </div>
         ) : preview && isVideo ? (
           <video
             src={preview}
@@ -412,7 +434,10 @@ export function VideoCapture({
                 setError(null)
                 setSummary(null)
                 setLastEvents([])
-                setLiveStreaming((active) => !active)
+                setLiveStreaming((active) => {
+                  if (active) setLiveBoxes([])
+                  return !active
+                })
               }}
             >
               <Video className="size-4" /> {liveStreaming ? 'Stop live' : 'Start live'}
@@ -459,6 +484,21 @@ export function VideoCapture({
         </div>
       )}
     </div>
+  )
+}
+
+function parseLiveBoxes(objects: NonNullable<DetectResult['objects']>): LiveDetectionBox[] {
+  return objects.flatMap((object) =>
+    (object.boxes ?? []).flatMap((box) => {
+        if (box.length !== 4 || !box.every((value) => Number.isFinite(value))) return []
+        const [x1, y1, x2, y2] = box.map((value) => Math.min(1, Math.max(0, value)))
+        if (x2 <= x1 || y2 <= y1) return []
+        return [{
+          box: [x1, y1, x2, y2] as [number, number, number, number],
+          label: object.phrase,
+          confidence: Math.min(1, Math.max(0, object.confidence)),
+        }]
+      }),
   )
 }
 

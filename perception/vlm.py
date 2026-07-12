@@ -233,6 +233,23 @@ class VLMDetector:
         text = self._chat(frame_bgr, prompts.discover(), model=self.cfg.discover_model)
         return _verdicts_from_discovery(extract_json_array(text), raw=text)
 
+    def discover_transition(self, before_bgr, after_bgr) -> list[Verdict]:
+        """Reason over an ordered pair through endpoints that accept one image.
+
+        BEFORE and AFTER are combined into one labeled side-by-side frame. This
+        preserves temporal context without relying on multi-image API support.
+        """
+        height, width = after_bgr.shape[:2]
+        if before_bgr.shape[:2] != (height, width):
+            before_bgr = cv2.resize(before_bgr, (width, height), interpolation=cv2.INTER_AREA)
+        comparison = cv2.hconcat([before_bgr, after_bgr])
+        cv2.putText(comparison, "BEFORE", (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        cv2.putText(comparison, "AFTER", (width + 12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        text = self._chat(
+            comparison, prompts.discover_transition(), model=self.cfg.discover_model
+        )
+        return _verdicts_from_discovery(extract_json_array(text), raw=text)
+
     def detect(self, frame_bgr, event_type: str) -> Verdict:
         """Targeted pass: yes/no for one caller-defined event type."""
         text = self._chat(frame_bgr, prompts.for_event(event_type))
@@ -269,6 +286,9 @@ class MockDetector:
             conf = 0.70 + ((h >> k) % 28) / 100
             verdicts.append(Verdict(event_type, True, min(conf, 0.99), count=count, detail=detail))
         return verdicts
+
+    def discover_transition(self, _before_bgr, after_bgr) -> list[Verdict]:
+        return self.discover(after_bgr)
 
     def detect(self, frame_bgr, event_type: str) -> Verdict:
         h = int(hashlib.md5(encode_jpeg(frame_bgr, 40)).hexdigest(), 16)

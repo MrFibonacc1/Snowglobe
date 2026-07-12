@@ -75,6 +75,27 @@ def _grounding_model_name():
     return getattr(_grounder, "model_name", None) or _grounding_kind
 
 
+def _detect_visible_objects(frame_img) -> list:
+    """Detect visible objects once, independently from actionable findings."""
+    if not getattr(_grounder, "enabled", False) or not hasattr(_grounder, "detect_all"):
+        return []
+    try:
+        return _grounder.detect_all(frame_img)
+    except Exception:
+        return []
+
+
+def _object_payload(detections: list) -> list[dict]:
+    return [
+        {
+            "phrase": detection.phrase,
+            "confidence": round(detection.confidence, 3),
+            "boxes": detection.boxes,
+        }
+        for detection in detections
+    ]
+
+
 @app.on_event("shutdown")
 def _shutdown_cameras():
     """Stop every capture worker cleanly when the app goes down, then release the
@@ -165,6 +186,8 @@ async def detect(
     discovery = not requested
 
     detector, used_mock = _detector(mock)
+    visible_detections = await _offload(_detect_visible_objects, frame_img)
+    visible_objects = _object_payload(visible_detections)
     # Attribute events to the model that actually produced them: discovery runs
     # on discover_model, targeted verification on the primary model.
     model_tag = "mock" if used_mock else _cfg.model
@@ -187,8 +210,13 @@ async def detect(
         t = time.perf_counter()
         try:
             def discover_and_ground():
-                found = detector.discover(frame_img)
-                fusion_mod.ground_verdicts(_grounder, frame_img, found)
+                if previous_frame is not None and hasattr(detector, "discover_transition"):
+                    found = detector.discover_transition(previous_frame, frame_img)
+                else:
+                    found = detector.discover(frame_img)
+                fusion_mod.ground_verdicts(
+                    _grounder, frame_img, found, frame_dets=visible_detections
+                )
                 return found
 
             found = await _offload(discover_and_ground)
@@ -220,6 +248,7 @@ async def detect(
                     )
                 )
         return {"kind": "image", "model": discover_tag, "mock": used_mock,
+                "objects": visible_objects,
                 "grounding": any(v.get("grounded") is not None for v in verdicts),
                 "grounding_model": _grounding_model_name(),
                 "motion_score": motion_score,
@@ -251,7 +280,8 @@ async def detect(
                 )
             )
 
-    return {"kind": "image", "model": model_tag, "mock": used_mock, "mode": "targeted",
+    return {"kind": "image", "model": model_tag, "mock": used_mock,
+            "objects": visible_objects, "mode": "targeted",
             "verdicts": verdicts, "events": emitted}
 
 
@@ -439,7 +469,7 @@ class CameraCreate(BaseModel):
     # Sampling rate must be a positive, sane value: fps <= 0 would busy-spin the
     # worker / fire the VLM with no throttle; an absurd upper value would hammer
     # it. Out-of-range values return 422.
-    fps: float = Field(default=0.3, gt=0, le=30)
+    fps: float = Field(default=2.0, gt=0, le=30)
     events: list[str] = []
     mock: bool = False
     automation_url: str | None = None  # optional override; defaults to Config

@@ -74,7 +74,7 @@ export function Overview({ store, onOpenRun }: { store: Store; onOpenRun?: (id: 
         <Card className={agentActive ? 'lg:col-span-1' : 'lg:col-span-2'}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="flex items-center gap-2">
-              <Sparkles className="size-4 text-primary" /> Insert a video
+              <Sparkles className="size-4 text-primary" /> Video
             </CardTitle>
             {(store.live || (viewerRun?.status === 'running')) && (
               <Badge variant="secondary" className="gap-1.5">
@@ -83,10 +83,6 @@ export function Overview({ store, onOpenRun }: { store: Store; onOpenRun?: (id: 
             )}
           </CardHeader>
           <CardContent>
-            <p className="mb-3 text-sm text-muted-foreground">
-              Drop in a clip or connect a camera. We detect what's happening, fire the matching
-              workflow, and the agent that spawns shows up below — you can watch it work.
-            </p>
             <VideoCapture store={store} onRunsStarted={setAgentRunIds} />
           </CardContent>
         </Card>

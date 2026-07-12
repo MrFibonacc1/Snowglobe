@@ -248,7 +248,7 @@ if let best { print(best.id) }
 
 def sample_frames(
     source: str,
-    fps: float = 0.3,
+    fps: float = 2.0,
     snapshot_dir: str = "snapshots",
     limit: int | None = None,
     max_seconds: float | None = None,
@@ -258,7 +258,7 @@ def sample_frames(
     """Yield Frame objects at approximately `fps`.
 
     For files with a known frame rate we skip frames deterministically (so a
-    10 s clip yields ~3 frames at 0.3 fps regardless of playback speed). For live
+    10 s clip yields ~20 frames at 2 fps regardless of playback speed). For live
     sources we gate on wall-clock time.
 
     `should_stop`, if given, is a zero-arg callable polled each iteration; when

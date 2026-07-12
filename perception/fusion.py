@@ -153,8 +153,11 @@ def fuse(verdict: Verdict, phrases: list[str], detections: list[Detection]) -> V
     return verdict
 
 
+_FRAME_DETECTIONS_UNSET = object()
+
+
 def ground_verdicts(
-    grounder, frame_bgr, verdicts: list[Verdict]
+    grounder, frame_bgr, verdicts: list[Verdict], frame_dets=_FRAME_DETECTIONS_UNSET
 ) -> list[Verdict]:
     """Confirm/deny each discovery verdict with the object detector, in place.
 
@@ -170,14 +173,15 @@ def ground_verdicts(
         return verdicts
     # Optimization for local YOLO: it detects the whole frame anyway, so run it
     # once and match per-finding, instead of one model call per finding.
-    frame_dets = None
-    if hasattr(grounder, "detect_all"):
+    if frame_dets is _FRAME_DETECTIONS_UNSET and hasattr(grounder, "detect_all"):
         try:
             frame_dets = grounder.detect_all(frame_bgr)
         except Exception:
             return verdicts            # detector errored; leave findings untouched
         if not getattr(grounder, "enabled", False):
             return verdicts            # model disabled itself during load; don't penalize
+    elif frame_dets is _FRAME_DETECTIONS_UNSET:
+        frame_dets = None
     for v in verdicts:
         phrases = phrases_for(v)
         if not phrases:

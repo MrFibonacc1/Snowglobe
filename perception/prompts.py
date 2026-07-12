@@ -46,7 +46,7 @@ PRODUCT_CONTEXT = (
 
 SYSTEM = (
     "You are a computer-vision inspector for a physical-space monitoring "
-    "system. You are shown a single video frame. Answer with ONLY compact JSON "
+    "system. You are shown one frame or an ordered pair of video frames. Answer with ONLY compact JSON "
     "— no prose, no markdown, no explanation outside the JSON. If you are "
     "unsure, prefer fewer findings with honest, lower confidence."
 )
@@ -84,6 +84,18 @@ DISCOVER = (
 def discover() -> str:
     """The open-ended discovery prompt."""
     return DISCOVER
+
+
+def discover_transition() -> str:
+    """Prompt for an ordered before/after pair, used for physical interactions."""
+    return (
+        PRODUCT_CONTEXT
+        + " You are shown two images in order: BEFORE, then AFTER. Compare them directly. "
+        "Report an item_removed_from_shelf finding when a visible person takes or removes "
+        "merchandise between the frames. Do not infer removal from possession alone. "
+        "Also report any other actionable transition visible across the pair."
+        + _DISCOVER_HINT
+    )
 
 
 def for_event(event_type: str) -> str:

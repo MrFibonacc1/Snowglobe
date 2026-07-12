@@ -1,16 +1,20 @@
 import { useEffect, useRef } from 'react'
 import { cameraStreamUrl } from '../api'
+import { DetectionOverlay, type DetectionBox } from './DetectionOverlay'
+
+export type LiveDetectionBox = DetectionBox
 
 export function LiveCameraStream({
   cameraId,
   onFrame,
+  boxes = [],
 }: {
   cameraId: string
   onFrame: (frame: Blob) => void
+  boxes?: LiveDetectionBox[]
 }) {
   const imageRef = useRef<HTMLImageElement>(null)
   const samplingRef = useRef(false)
-
   useEffect(() => {
     const timer = setInterval(() => {
       const image = imageRef.current
@@ -34,12 +38,15 @@ export function LiveCameraStream({
   }, [cameraId, onFrame])
 
   return (
-    <img
-      ref={imageRef}
-      src={cameraStreamUrl(cameraId)}
-      crossOrigin="anonymous"
-      alt="live camera preview"
-      className="max-h-72 w-full rounded-lg border object-contain"
-    />
+    <div className="relative mx-auto flex w-fit max-w-full justify-center overflow-hidden rounded-md">
+      <img
+        ref={imageRef}
+        src={cameraStreamUrl(cameraId)}
+        crossOrigin="anonymous"
+        alt="live camera preview"
+        className="block max-h-72 max-w-full object-contain"
+      />
+      <DetectionOverlay mediaRef={imageRef} boxes={boxes} />
+    </div>
   )
 }

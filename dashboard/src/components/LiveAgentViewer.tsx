@@ -227,9 +227,6 @@ function ActionRow({
       </span>
       <div className="min-w-0 flex-1">
         <span className={cn('font-medium', active && 'text-primary')}>{step.title}</span>
-        {step.detail && (
-          <div className="line-clamp-2 text-muted-foreground">{step.detail}</div>
-        )}
       </div>
     </div>
   )

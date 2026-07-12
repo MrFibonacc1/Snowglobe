@@ -2,7 +2,7 @@
 
 Video in → Cosmos 3 Reasoner detections → events out.
 
-Samples frames (~0.3 fps, one every ~3s) from a webcam, RTSP stream, or clip; sends each to
+Samples frames (~2 fps, one every 0.5s) from a webcam, RTSP stream, or clip; sends each to
 NVIDIA's Cosmos 3 Reasoner (physical-AI VLM) via NIM with one prompt per event
 type; normalizes responses into the [shared event schema](../shared/event_schema.json);
 and POSTs them to `automation/`'s `/events` endpoint.

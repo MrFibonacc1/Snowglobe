@@ -77,7 +77,7 @@ class CameraState:
     name: str
     source: str
     zone: str
-    fps: float = 0.3
+    fps: float = 2.0
     events: list[str] = field(default_factory=list)
     mock: bool = False
     # Original request source when `source` is a normalized gateway (go2rtc) URL;
@@ -419,7 +419,7 @@ class CameraRegistry:
         name: str,
         source: str,
         zone: str,
-        fps: float = 0.3,
+        fps: float = 2.0,
         events: list[str] | None = None,
         mock: bool = False,
         automation_url: str | None = None,
