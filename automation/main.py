@@ -28,7 +28,7 @@ except Exception:
     pass  # python-dotenv not installed — rely on real env vars
 
 import jsonschema
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 
@@ -175,9 +175,15 @@ async def delete_workflow(wf_id: str):
 
 
 @app.post("/workflows/{wf_id}/test", status_code=202)
-async def test_workflow(wf_id: str):
+async def test_workflow(wf_id: str, body: dict = Body(default={})):
     """Fire a synthetic matching event at one workflow — ignores enabled
-    flag and cooldown. For demos and for the builder's 'Test' button."""
+    flag and cooldown. For demos and for the builder's 'Test' button.
+
+    Optional JSON body lets the tester supply inputs the workflow acts on:
+      {"product": "coke", "location": "aisle_3", "confidence": 0.9}
+    `product` populates event.payload.product AND .detail, so agent
+    instructions using {{event.payload.product}} or {{event.payload.detail}}
+    receive it."""
     wf = storage.get_workflow(wf_id)
     if not wf:
         raise HTTPException(404)
@@ -186,15 +192,23 @@ async def test_workflow(wf_id: str):
         run_id = await scheduler.run_scheduled(wf)
         return {"accepted": True, "run_id": run_id}
     t = wf["trigger"]
+    overrides = body if isinstance(body, dict) else {}
+    payload = {"detail": "synthetic test event", "count": 99}
+    product = str(overrides.get("product") or "").strip()
+    if product:
+        payload["product"] = product
+        payload["detail"] = product
+    if isinstance(overrides.get("payload"), dict):
+        payload.update(overrides["payload"])
     event = {
         "event_id": f"evt_test_{uuid.uuid4().hex[:8]}",
         "event_type": t.get("event_type", "*"),
         "timestamp": __import__("datetime").datetime.now(
             __import__("datetime").timezone.utc
         ).isoformat(),
-        "confidence": 0.99,
-        "location": t.get("zone", "zone_test"),
-        "payload": {"detail": "synthetic test event", "count": 99},
+        "confidence": float(overrides.get("confidence", 0.99)),
+        "location": str(overrides.get("location") or t.get("zone") or "zone_test"),
+        "payload": payload,
     }
     storage.insert_event(event)
     run = engine._new_run(wf, event)
