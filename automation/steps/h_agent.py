@@ -50,6 +50,40 @@ POLL_SEC = int(os.environ.get("H_AGENT_POLL_SEC", "5"))
 
 _RUNNING = {"pending", "running", "starting", "queued", "initializing", "created"}
 
+_SAFE_DIAGNOSTICS = {
+    "backend", "agent", "session_id", "task_id", "agent_view_url",
+    "status", "state", "outcome", "steps", "duration_sec", "task", "url",
+}
+
+
+class AgentExecutionError(RuntimeError):
+    """The real agent did not produce a terminal, usable result."""
+
+    def __init__(self, message: str, details: dict | None = None):
+        super().__init__(message)
+        self.details = {
+            key: value for key, value in (details or {}).items()
+            if key in _SAFE_DIAGNOSTICS and value is not None
+        }
+
+
+def _require_terminal_answer(output: dict, running_states: set[str]) -> dict:
+    """Fail closed when an agent is unfinished or has no downstream-safe answer."""
+    status = str(output.get("status") or output.get("state") or "").lower()
+    backend = output.get("backend", "agent")
+    if status in running_states:
+        raise AgentExecutionError(
+            f"{backend} exceeded its time budget while status={status}; no completed answer was produced",
+            output,
+        )
+    answer = output.get("answer")
+    if not isinstance(answer, str) or not answer.strip():
+        raise AgentExecutionError(
+            f"{backend} reached status={status or 'unknown'} without a usable answer",
+            output,
+        )
+    return output
+
 
 def execute(config: dict, event: dict) -> dict:
     mode = os.environ.get("H_AGENT_MODE", MODE)
@@ -109,7 +143,7 @@ def _run_agent_api(config: dict) -> dict:
                 break
 
     st = last.get("status") or {}
-    return {
+    return _require_terminal_answer({
         "backend": "agent_api",
         "agent": agent,
         "session_id": session_id,
@@ -121,7 +155,7 @@ def _run_agent_api(config: dict) -> dict:
         "duration_sec": round(time.time() - started, 1),
         "task": config.get("task"),
         "url": url,
-    }
+    }, _RUNNING)
 
 
 # --- agent_mcp: H agents via their official hosted MCP server ---------------
@@ -218,7 +252,7 @@ def _run_agent_mcp(config: dict) -> dict:
             except Exception:  # noqa: BLE001 — sharing is best-effort
                 pass
 
-    return {
+    return _require_terminal_answer({
         "backend": "agent_mcp",
         "agent": agent,
         "session_id": session_id,
@@ -228,7 +262,7 @@ def _run_agent_mcp(config: dict) -> dict:
         "duration_sec": round(time.time() - started, 1),
         "task": config.get("task"),
         "url": url,
-    }
+    }, _MCP_RUNNING)
 
 
 def _mcp_status(obj: dict):
@@ -311,7 +345,7 @@ def _a2a_text(obj: dict) -> str | None:
 
 
 def _nemoclaw_output(last: dict, state: str | None, started: float, config: dict) -> dict:
-    return {
+    return _require_terminal_answer({
         "backend": "nemoclaw",
         "a2a_url": NEMOCLAW_A2A_URL,
         "task_id": last.get("id"),
@@ -320,7 +354,7 @@ def _nemoclaw_output(last: dict, state: str | None, started: float, config: dict
         "duration_sec": round(time.time() - started, 1),
         "task": config.get("task"),
         "url": config.get("url"),
-    }
+    }, _A2A_RUNNING)
 
 
 def _mock(config: dict) -> dict:

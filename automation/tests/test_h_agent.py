@@ -1,0 +1,90 @@
+import os
+import sys
+import unittest
+from unittest.mock import patch
+
+AUTOMATION_DIR = os.path.dirname(os.path.dirname(__file__))
+if AUTOMATION_DIR not in sys.path:
+    sys.path.insert(0, AUTOMATION_DIR)
+
+from steps import h_agent
+
+
+class _Response:
+    def __init__(self, body):
+        self._body = body
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._body
+
+
+class _Client:
+    def __init__(self, snapshots):
+        self.snapshots = iter(snapshots)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def post(self, path, json):
+        return _Response({
+            "id": "session-123",
+            "agent_view_url": "https://example.test/replay/session-123",
+            "status": {"status": "running", "steps": 14},
+        })
+
+    def get(self, path):
+        return _Response(next(self.snapshots))
+
+
+class AgentApiCompletionTests(unittest.TestCase):
+    def _run(self, snapshot, times):
+        client = _Client([snapshot])
+        with patch.dict(os.environ, {"HAI_API_KEY": "redacted"}, clear=False), patch.object(
+            h_agent.httpx, "Client", return_value=client
+        ), patch.object(h_agent.time, "sleep"), patch.object(
+            h_agent.time, "time", side_effect=times
+        ):
+            return h_agent._run_agent_api({
+                "instructions": "finish the task",
+                "timeout_sec": 150,
+            })
+
+    def test_running_session_at_budget_raises_instead_of_returning_partial_output(self):
+        snapshot = {
+            "id": "session-123",
+            "status": {"status": "running", "steps": 27},
+            "latest_answer": None,
+        }
+        with self.assertRaisesRegex(RuntimeError, "time budget"):
+            self._run(snapshot, [0, 0, 151, 151])
+
+    def test_terminal_session_without_answer_raises(self):
+        snapshot = {
+            "id": "session-123",
+            "finished_at": "2026-07-12T00:00:00Z",
+            "status": {"status": "completed", "steps": 14},
+            "latest_answer": None,
+        }
+        with self.assertRaisesRegex(RuntimeError, "answer"):
+            self._run(snapshot, [0, 0, 1])
+
+    def test_terminal_session_with_answer_returns_completed_output(self):
+        snapshot = {
+            "id": "session-123",
+            "finished_at": "2026-07-12T00:00:00Z",
+            "status": {"status": "completed", "steps": 14},
+            "latest_answer": "Task completed cleanly.",
+        }
+        output = self._run(snapshot, [0, 0, 1])
+        self.assertEqual(output["answer"], "Task completed cleanly.")
+        self.assertEqual(output["status"], "completed")
+
+
+if __name__ == "__main__":
+    unittest.main()

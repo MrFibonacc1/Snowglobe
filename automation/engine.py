@@ -129,7 +129,9 @@ async def execute_run(run: dict, workflow: dict, event: dict) -> None:
             step["status"] = "done"
         except Exception as exc:  # noqa: BLE001 — surface anything to the run log
             step["status"] = "failed"
-            step["output"] = {"error": str(exc)}
+            details = getattr(exc, "details", {})
+            step["output"] = dict(details) if isinstance(details, dict) else {}
+            step["output"]["error"] = str(exc)
             failed = True
         step["finished_at"] = datetime.now(timezone.utc).isoformat()
         storage.update_run(run)

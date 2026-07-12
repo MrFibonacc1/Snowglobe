@@ -166,8 +166,19 @@ function StepDetail({ step }: { step: RunStep }) {
   const out = (step.output ?? {}) as Record<string, unknown>
   if (step.status === 'pending')
     return <div className="text-xs text-muted-foreground">waiting…</div>
-  if (out.error)
-    return <div className="text-xs text-destructive">{String(out.error)}</div>
+  if (out.error) {
+    const diagnostics = []
+    if (out.backend) diagnostics.push(String(out.backend))
+    if (out.status || out.state) diagnostics.push(`status ${String(out.status ?? out.state)}`)
+    if (out.steps !== undefined) diagnostics.push(`${String(out.steps)} steps`)
+    if (out.duration_sec !== undefined) diagnostics.push(`${String(out.duration_sec)}s`)
+    return (
+      <div className="text-xs text-destructive">
+        <div>{String(out.error)}</div>
+        {diagnostics.length > 0 && <div className="mt-0.5 opacity-70">{diagnostics.join(' · ')}</div>}
+      </div>
+    )
+  }
 
   if (step.type === 'h_agent') {
     // The agent's actual answer is the most useful thing to show.

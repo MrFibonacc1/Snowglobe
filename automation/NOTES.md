@@ -36,6 +36,15 @@ No clone, no venv, no browser. The step:
 3. returns `session_id`, **`agent_view_url`** (a live/replay link — surface it in
    the dashboard runs view!), `status`, `outcome`, and `latest_answer`.
 
+The workflow treats the polling budget as a hard completion boundary. If the
+session is still running when `H_AGENT_TIMEOUT_SEC` (default 300s) expires, or
+if it reaches a terminal state without a non-empty answer, the agent step and
+overall run fail and all dependent steps are skipped. The failed step retains
+the session ID, replay URL, status, step count, and duration for diagnosis; it
+is never reported as done and `{{steps.<id>.answer}}` is never rendered as an
+empty downstream message. For legitimately long missions, set a larger
+per-step `timeout_sec` instead of accepting partial output.
+
 Base URLs: EU `https://agp.eu.hcompany.ai/api/v2` · US `https://agp.hcompany.ai/api/v2`.
 
 ### Verified status (2026-07-11, evening) — ✅ FULLY WORKING
@@ -167,7 +176,7 @@ server's `tools/list`). Check the exact tool names/args before the demo.
 | `HAI_API_KEY` | agent_api (and surfer_cli) |
 | `HAI_AGENT_REGION` | `eu` (default) / `us` |
 | `HAI_AGENT_BASE_URL`, `HAI_AGENT_NAME` | agent_api overrides |
-| `H_AGENT_TIMEOUT_SEC`, `H_AGENT_POLL_SEC` | agent_api polling |
+| `H_AGENT_TIMEOUT_SEC`, `H_AGENT_POLL_SEC` | real-agent completion budget (default 300s) and polling interval; steps may override with `timeout_sec` |
 | `SURFER_H_CLI_DIR`, `SURFER_H_BIN`, `HAI_MODEL_URL`, `HAI_MODEL_NAME` | legacy surfer_cli |
 | `COMPOSIO_API_KEY`, `COMPOSIO_USER_ID` | real Composio actions |
 | `GRADIUM_API_KEY` | voice step (stretch, not implemented) |
