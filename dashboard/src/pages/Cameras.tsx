@@ -225,7 +225,7 @@ function AddCameraDialog({
           {needsUrl && (
             <Field
               label="Stream URL"
-              hint="Perception samples this feed at 1 fps and sends frames to the Cosmos 3 Reasoner."
+              hint="Perception samples this feed at ~0.3 fps (one frame every ~3s) and sends frames to the Cosmos 3 Reasoner."
             >
               <Input
                 value={url}

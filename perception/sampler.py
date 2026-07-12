@@ -36,7 +36,7 @@ def _is_file(resolved) -> bool:
 
 def sample_frames(
     source: str,
-    fps: float = 1.0,
+    fps: float = 0.3,
     snapshot_dir: str = "snapshots",
     limit: int | None = None,
     max_seconds: float | None = None,
@@ -45,7 +45,7 @@ def sample_frames(
     """Yield Frame objects at approximately `fps`.
 
     For files with a known frame rate we skip frames deterministically (so a
-    10 s clip yields ~10 frames at 1 fps regardless of playback speed). For live
+    10 s clip yields ~3 frames at 0.3 fps regardless of playback speed). For live
     sources we gate on wall-clock time.
     """
     resolved = resolve_source(source)

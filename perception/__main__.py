@@ -23,7 +23,10 @@ def parse_args(argv=None):
                         "Types are arbitrary, caller-defined slugs, e.g. "
                         "'spill,blocked_exit'. Leave empty for open-ended "
                         "discovery, where the model names events itself.")
-    p.add_argument("--fps", type=float, default=1.0, help="frames sampled per second")
+    p.add_argument("--fps", type=float, default=0.3,
+                   help="frames sampled per second (default ~1 frame every 3s; "
+                        "matches the Reasoner's per-call latency and the slow "
+                        "timescale of the events we detect)")
     p.add_argument("--min-confidence", type=float, default=0.5,
                    help="drop detections below this confidence")
     p.add_argument("--cooldown", type=float, default=0.0,
