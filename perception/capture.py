@@ -53,7 +53,7 @@ _STALE_RECONNECT_SEC = 15.0
 
 # How often the reader refreshes the in-memory JPEG preview (Hz). Kept well
 # below the stream rate so encoding never becomes the reader's bottleneck.
-_PREVIEW_HZ = 4.0
+_PREVIEW_HZ = 8.0
 
 # Defensive floor on the sampling rate inside the worker. The API validates
 # fps > 0, but clamping here guarantees the interval math stays positive (no

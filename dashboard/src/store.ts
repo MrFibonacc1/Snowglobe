@@ -18,6 +18,7 @@ import {
   api,
   createCamera,
   deleteCamera as apiDeleteCamera,
+  ApiError,
   listCameras,
   pauseCamera as apiPauseCamera,
   resumeCamera as apiResumeCamera,
@@ -150,6 +151,11 @@ function normalizeTestingRun(input: unknown): TestingRunState | null {
   if (typeof candidate.fileName !== 'string' || !candidate.fileName) return null
   return {
     ...candidate,
+    // A fresh page load can never have a genuinely in-flight request left
+    // over from before — that JS context is gone. Without this, a reload
+    // mid-request (or a dev-server HMR reload) permanently freezes the UI on
+    // "calling the vision model…" since nothing will ever resolve it.
+    running: false,
     zone: candidate.zone || 'zone_a',
   } as TestingRunState
 }
@@ -198,10 +204,12 @@ export interface NewCamera {
   detects: EventType[]
 }
 
-// The perception service samples an rtsp/hls feed by its URL; for a local
-// webcam or uploaded file the source-type name is the source string.
+// The perception service samples rtsp/hls by URL. For local webcam we allow
+// selecting an explicit camera index via `url`, e.g. "1".
 function sourceString(c: NewCamera): string {
-  return (c.source === 'rtsp' || c.source === 'hls') && c.url ? c.url : c.source
+  return ((c.source === 'rtsp' || c.source === 'hls' || c.source === 'webcam') && c.url)
+    ? c.url
+    : c.source
 }
 
 // Map a backend CameraState onto a dashboard Camera, preserving the UI-only
@@ -242,6 +250,7 @@ export function useStore() {
   stateRef.current = state
   const backendRef = useRef(backendOnline)
   backendRef.current = backendOnline
+  const localCameraIds = useRef(new Set<string>())
 
   useEffect(() => {
     try {
@@ -707,7 +716,9 @@ export function useStore() {
         return { online: true }
       } catch {
         markBackend(false)
-        const camera: Camera = { ...input, id: uid('cam'), status: 'connecting', eventsToday: 0 }
+        const id = uid('cam')
+        localCameraIds.current.add(id)
+        const camera: Camera = { ...input, id, status: 'connecting', eventsToday: 0 }
         setState((s) => ({ ...s, cameras: [...s.cameras, camera] }))
         return { online: false }
       }
@@ -721,12 +732,19 @@ export function useStore() {
       // vanishes from the UI while it keeps running on the backend.
       const removed = stateRef.current.cameras.find((c) => c.id === id)
       setState((s) => ({ ...s, cameras: s.cameras.filter((c) => c.id !== id) }))
+      if (localCameraIds.current.delete(id)) {
+        // Local fallback camera was never persisted in the perception service.
+        return
+      }
       try {
         await apiDeleteCamera(id)
         markBackend(true)
-      } catch {
+      } catch (err) {
         markBackend(false)
         // Restore it (keep it visible) so it doesn't orphan on the backend.
+        // A 404 means the camera was already gone from perception, so keep it
+        // removed locally instead of restoring it immediately.
+        if (err instanceof ApiError && err.status === 404) return
         if (removed) {
           setState((s) =>
             s.cameras.some((c) => c.id === id)
@@ -743,6 +761,14 @@ export function useStore() {
   // set `fallback` when the perception service is unreachable).
   const applyCameraMutation = useCallback(
     async (id: string, call: (id: string) => Promise<CameraState>, fallback: Camera['status']) => {
+      if (localCameraIds.current.has(id)) {
+        setState((s) => ({
+          ...s,
+          cameras: s.cameras.map((c) => (c.id === id ? { ...c, status: fallback } : c)),
+        }))
+        return
+      }
+
       // Remember the pre-mutation status so a failed call can be reverted
       // rather than left stuck on the optimistic value.
       const prevStatus = stateRef.current.cameras.find((c) => c.id === id)?.status

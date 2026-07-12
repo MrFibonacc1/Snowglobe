@@ -13,11 +13,21 @@ import { PillToggle } from './Cameras'
 import { ConfidenceBar, EventIcon } from '../components/ui-kit'
 import { Upload, Check, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { api } from '../api'
+import { api, cameraSnapshotUrl } from '../api'
 
 const PERCEPTION_URL =
   (import.meta.env.VITE_PERCEPTION_URL as string | undefined) ?? 'http://localhost:8008'
 const TESTING_SESSION_KEY = 'snowglobe.testing.session.v1'
+// Client-side cap on a single /detect call. The perception service's own VLM
+// timeout is 60s (see perception/config.py VLM_TIMEOUT) — when the upstream
+// model API stalls (it does; this happens in practice), waiting that long
+// would freeze the whole live loop on one bad frame. Abort well before that
+// and let the next tick grab a fresh screenshot instead of waiting it out.
+const DETECT_TIMEOUT_MS = 20000
+// Live mode renders like a video result (summary + frame timeline) instead of
+// replacing a single-frame verdict every tick — that swap-to-blank-then-fill
+// on every cycle read as "it keeps reloading and never lands." The timeline
+// is uncapped by design (cleared only when a new live session starts).
 
 interface Verdict {
   event_type: EventType
@@ -142,15 +152,148 @@ export function Testing({ store }: { store: Store }) {
   const [zone, setZone] = useState(initialDraft.zone)
   const [minConf, setMinConf] = useState<number>(initialDraft.minConf)
   const [fileMeta, setFileMeta] = useState<TestingFileMeta | null>(() => initialDraft.fileMeta ?? null)
+  const [cameraId, setCameraId] = useState<string>('')
+  const [liveStreaming, setLiveStreaming] = useState(false)
+  // Live-mode analysis accumulates into this timeline (rendered via
+  // VideoResults, same as an uploaded video) instead of replacing a single
+  // result every tick.
+  const [liveFrames, setLiveFrames] = useState<FrameResult[]>([])
+  const [liveEvents, setLiveEvents] = useState<Record<string, unknown>[]>([])
+  const [liveModelLabel, setLiveModelLabel] = useState<{ model: string; mock: boolean } | null>(null)
+  const [liveBusy, setLiveBusy] = useState(false)
+  const [liveError, setLiveError] = useState<string | null>(null)
+  const liveFrameSeqRef = useRef(0)
+  const liveStartedAtRef = useRef<number | null>(null)
+  // Browser-camera source: uses getUserMedia (the real permission prompt)
+  // instead of the perception service opening a device on its own host —
+  // this is what lets a deployed visitor use their own camera.
+  const [browserStream, setBrowserStream] = useState<MediaStream | null>(null)
+  const [browserLive, setBrowserLive] = useState(false)
+  const [browserError, setBrowserError] = useState<string | null>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const file = store.testingFile
+  const liveCameras = useMemo(
+    () =>
+      store.cameras.filter(
+        (camera) => camera.status === 'live' && camera.events_emitted !== undefined,
+      ),
+    [store.cameras],
+  )
   const isVideo = file
     ? file.type.startsWith('video/')
     : (fileMeta?.type?.startsWith('video/') ?? false)
   const busy = store.testingRun?.running ?? false
   const result = (store.testingResult as DetectResult | null) ?? null
   const error = store.testingError
+  // Live mode's accumulated timeline, shaped exactly like a /detect_video
+  // response so it can render through the same VideoResults component.
+  const liveResult: DetectResult | null = useMemo(() => {
+    if (!liveModelLabel) return null
+    return {
+      kind: 'video',
+      model: liveModelLabel.model,
+      mock: liveModelLabel.mock,
+      summary: computeLiveSummary(liveFrames, minConf),
+      frames: liveFrames,
+      frames_analyzed: liveFrames.length,
+      events: liveEvents,
+    }
+  }, [liveModelLabel, liveFrames, liveEvents, minConf])
+  const selectedCam = useMemo(
+    () => liveCameras.find((camera) => camera.id === cameraId),
+    [liveCameras, cameraId],
+  )
+  const showLiveResults = (liveStreaming && !!selectedCam) || browserLive
+
+  useEffect(() => {
+    if (!cameraId && liveCameras.length > 0) {
+      setCameraId(liveCameras[0].id)
+      return
+    }
+    if (cameraId && !liveCameras.some((camera) => camera.id === cameraId)) {
+      setCameraId(liveCameras[0]?.id ?? '')
+    }
+  }, [cameraId, liveCameras])
+
+  // Live camera went away (removed/paused) — drop out of live mode with it.
+  useEffect(() => {
+    if (!selectedCam) setLiveStreaming(false)
+  }, [selectedCam])
+
+  // Starting a live session (either source) begins a fresh timeline (revoking
+  // any thumbnail object URLs from the previous session so they don't leak).
+  useEffect(() => {
+    if (!liveStreaming && !browserLive) return
+    setLiveFrames((prev) => {
+      prev.forEach((f) => URL.revokeObjectURL(f.thumb))
+      return []
+    })
+    setLiveEvents([])
+    setLiveModelLabel(null)
+    setLiveError(null)
+    liveFrameSeqRef.current = 0
+    liveStartedAtRef.current = Date.now()
+  }, [liveStreaming, browserLive, selectedCam?.id])
+
+  // Attach/detach the browser camera's MediaStream to the <video> element.
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.srcObject = browserStream
+  }, [browserStream])
+
+  // Release the camera hardware whenever the stream changes or on unmount —
+  // getUserMedia tracks keep the camera light on until explicitly stopped.
+  useEffect(() => {
+    return () => {
+      browserStream?.getTracks().forEach((t) => t.stop())
+    }
+  }, [browserStream])
+
+  const startBrowserCamera = useCallback(async () => {
+    setBrowserError(null)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+      })
+      setLiveStreaming(false) // only one live source analyzed at a time
+      setBrowserStream(stream)
+    } catch (e) {
+      setBrowserError(`Could not access your camera: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }, [])
+
+  const stopBrowserCamera = useCallback(() => {
+    setBrowserLive(false)
+    setBrowserStream((prev) => {
+      prev?.getTracks().forEach((t) => t.stop())
+      return null
+    })
+  }, [])
+
+  // Draws the current video frame to an offscreen canvas and encodes it as a
+  // JPEG — the browser-camera equivalent of fetching a perception snapshot.
+  const captureBrowserFrame = useCallback(async (): Promise<{ file: File; blob: Blob } | null> => {
+    const video = videoRef.current
+    if (!video || video.readyState < 2 || !video.videoWidth) return null
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    ctx.drawImage(video, 0, 0)
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85))
+    if (!blob) return null
+    return { file: new File([blob], 'browser-camera-frame.jpg', { type: 'image/jpeg' }), blob }
+  }, [])
+
+  // Revoke any remaining thumbnail object URLs when the page unmounts.
+  useEffect(() => {
+    return () => {
+      liveFrames.forEach((f) => URL.revokeObjectURL(f.thumb))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (!file) {
@@ -216,8 +359,8 @@ export function Testing({ store }: { store: Store }) {
     setCustomType('')
   }
 
-  const estimateVideoSampling = useCallback(() => {
-    if (!isVideo || !videoDuration || !Number.isFinite(videoDuration)) {
+  const estimateVideoSampling = useCallback((videoIsTarget = isVideo) => {
+    if (!videoIsTarget || !videoDuration || !Number.isFinite(videoDuration)) {
       return { fps: 0.8, maxFrames: 8 }
     }
     const fps = videoDuration >= 180 ? 0.4 : videoDuration >= 60 ? 0.7 : 0.95
@@ -225,7 +368,8 @@ export function Testing({ store }: { store: Store }) {
     return { fps: Number(fps.toFixed(2)), maxFrames }
   }, [isVideo, videoDuration])
 
-  const canRun = !!file && (discover || selected.length > 0)
+  const canRunFromUpload = !!file && (discover || selected.length > 0)
+  const canRunFromCamera = !!cameraId && (discover || selected.length > 0)
   const refreshRuns = useCallback(async () => {
     if (!api.configured()) return
     await store.refreshRuns()
@@ -269,12 +413,183 @@ export function Testing({ store }: { store: Store }) {
     },
     [refreshRuns, store],
   )
-  async function run() {
-    if (!canRun) return
-    const mediaKind: 'image' | 'video' = isVideo ? 'video' : 'image'
+  // One live-mode tick: analyzes a single grabbed frame and appends it to the
+  // timeline, rather than replacing a single result the way `run()` does for
+  // uploads/manual grabs. Deliberately doesn't touch store.testingResult/
+  // testingRun — those stay owned by the manual flow.
+  const runLiveAnalysisTick = useCallback(
+    async (activeFile: File, blob: Blob) => {
+      setLiveBusy(true)
+      try {
+        const fd = new FormData()
+        fd.append('file', activeFile)
+        fd.append('events', discover ? '' : selected.join(','))
+        fd.append('zone', zone)
+        fd.append('min_confidence', String(minConf))
+        const res = await fetch(`${PERCEPTION_URL}/detect`, {
+          method: 'POST',
+          body: fd,
+          signal: AbortSignal.timeout(DETECT_TIMEOUT_MS),
+        })
+        if (!res.ok) {
+          const body = await res.text()
+          throw new Error(`detect API returned ${res.status}: ${body.slice(0, 200)}`)
+        }
+        const payload = (await res.json()) as DetectResult
+        const events = parseResultEvents(payload.events ?? [])
+        setLiveModelLabel({ model: payload.model, mock: payload.mock })
+        setLiveError(null)
+
+        const startedAt = liveStartedAtRef.current ?? Date.now()
+        const frame: FrameResult = {
+          index: liveFrameSeqRef.current++,
+          t_sec: Math.round((Date.now() - startedAt) / 1000),
+          thumb: URL.createObjectURL(blob),
+          verdicts: payload.verdicts ?? [],
+        }
+        setLiveFrames((prev) => [...prev, frame])
+
+        if (events.length) {
+          setLiveEvents((prev) => [...(payload.events ?? []), ...prev].slice(0, 50))
+          store.ingestEvents(events)
+          if (api.configured()) {
+            // Fire-and-forget: live mode shouldn't block the next tick on
+            // automation's run bookkeeping the way the manual flow does.
+            events.forEach((event) => {
+              api.postEvent(event).catch((err) => {
+                setLiveError(
+                  `Detection returned events, but posting to automation failed: ${
+                    err instanceof Error ? err.message : String(err)
+                  }`,
+                )
+              })
+            })
+          }
+        }
+      } catch (e) {
+        setLiveError(
+          e instanceof Error && e.name === 'TimeoutError'
+            ? `Vision model call timed out after ${DETECT_TIMEOUT_MS / 1000}s — moving on to the next frame.`
+            : `Live analysis failed: ${e instanceof Error ? e.message : String(e)}`,
+        )
+      } finally {
+        setLiveBusy(false)
+      }
+    },
+    [discover, selected, zone, minConf, store],
+  )
+
+  const runFromCamera = useCallback(async () => {
+    const selectedCam = liveCameras.find((camera) => camera.id === cameraId)
+    if (!selectedCam) {
+      store.setTestingError('No live camera selected for testing.')
+      return
+    }
+    try {
+      const url = `${cameraSnapshotUrl(selectedCam.id)}?t=${Date.now()}`
+      const res = await fetch(url)
+      if (!res.ok) {
+        throw new Error(`snapshot fetch failed with ${res.status}`)
+      }
+      const blob = await res.blob()
+      const snap = new File(
+        [blob],
+        `camera-${selectedCam.id}-frame.jpg`,
+        { type: blob.type || 'image/jpeg' },
+      )
+
+      if (liveStreaming) {
+        await runLiveAnalysisTick(snap, blob)
+        return
+      }
+
+      store.setTestingError(null)
+      store.setTestingResult(null)
+      store.setTestingFile(snap)
+      setFileMeta({
+        name: snap.name,
+        type: snap.type,
+        size: snap.size,
+        lastModified: snap.lastModified,
+      })
+      await run(snap)
+    } catch (e) {
+      const msg = `Could not capture a frame from ${selectedCam.name}: ${
+        e instanceof Error ? e.message : String(e)
+      }`
+      if (liveStreaming) setLiveError(msg)
+      else store.setTestingError(msg)
+    }
+  }, [cameraId, liveCameras, liveStreaming, run, runLiveAnalysisTick, store])
+
+  // Kept in a ref so the analysis-loop effect below doesn't need runFromCamera
+  // in its deps — that identity churns every render (it closes over `run`,
+  // which is unmemoized), which would otherwise reset the interval before it
+  // ever fires at low fps.
+  const runFromCameraRef = useRef(runFromCamera)
+  useEffect(() => {
+    runFromCameraRef.current = runFromCamera
+  }, [runFromCamera])
+
+  // Live mode: the preview streams smoothly (see LiveCameraStream) at its own
+  // fixed rate, decoupled from analysis — analysis isn't pinned to any fps at
+  // all. It just runs back-to-back: grab a frame, wait for that one call to
+  // resolve, immediately grab the next. The only pacing is however long the
+  // vision model actually takes to respond (DETECT_TIMEOUT_MS bounds the
+  // worst case), so it goes as fast as the model allows without piling up
+  // overlapping calls.
+  useEffect(() => {
+    if (!liveStreaming || !selectedCam) return
+    let cancelled = false
+    ;(async () => {
+      while (!cancelled) {
+        await runFromCameraRef.current()
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [liveStreaming, selectedCam?.id])
+
+  // Kept in a ref for the same reason as runFromCameraRef above — the loop
+  // below shouldn't restart just because runLiveAnalysisTick's identity
+  // churns (it closes over discover/selected/zone/minConf/store).
+  const runLiveAnalysisTickRef = useRef(runLiveAnalysisTick)
+  useEffect(() => {
+    runLiveAnalysisTickRef.current = runLiveAnalysisTick
+  }, [runLiveAnalysisTick])
+
+  // Same back-to-back pacing as the perception-camera loop above, but
+  // capturing frames from the browser's own camera via canvas instead of
+  // fetching a snapshot from the perception service.
+  useEffect(() => {
+    if (!browserLive || !browserStream) return
+    let cancelled = false
+    ;(async () => {
+      while (!cancelled) {
+        const captured = await captureBrowserFrame()
+        if (cancelled) break
+        if (captured) {
+          await runLiveAnalysisTickRef.current(captured.file, captured.blob)
+        } else {
+          // Video element not ready for its first frame yet — brief wait.
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [browserLive, browserStream, captureBrowserFrame])
+
+  async function run(inputFile?: File) {
+    const activeFile = inputFile ?? file
+    if (!activeFile) return
+    const activeIsVideo = activeFile.type.startsWith('video/')
+    const mediaKind: 'image' | 'video' = activeIsVideo ? 'video' : 'image'
     const runId = store.startTestingRun({
       kind: mediaKind,
-      fileName: file?.name || 'upload',
+      fileName: activeFile.name || 'upload',
       zone,
     })
     let latestPayload: Record<string, unknown> = { kind: mediaKind }
@@ -286,18 +601,22 @@ export function Testing({ store }: { store: Store }) {
 
     try {
       const fd = new FormData()
-      fd.append('file', file as File)
+      fd.append('file', activeFile)
       // Empty `events` → open-ended discovery on the server.
       fd.append('events', discover ? '' : selected.join(','))
       fd.append('zone', zone)
       fd.append('min_confidence', String(minConf))
-      const endpoint = isVideo ? '/detect_video' : '/detect'
-      if (isVideo) {
-        const { fps, maxFrames } = estimateVideoSampling()
+      const endpoint = activeIsVideo ? '/detect_video' : '/detect'
+      if (activeIsVideo) {
+        const { fps, maxFrames } = estimateVideoSampling(activeIsVideo)
         fd.append('fps', String(fps))
         fd.append('max_frames', String(maxFrames))
       }
-      const res = await fetch(`${PERCEPTION_URL}${endpoint}`, { method: 'POST', body: fd })
+      const res = await fetch(`${PERCEPTION_URL}${endpoint}`, {
+        method: 'POST',
+        body: fd,
+        signal: AbortSignal.timeout(DETECT_TIMEOUT_MS),
+      })
       if (!res.ok) {
         const body = await res.text()
         throw new Error(`detect API returned ${res.status}: ${body.slice(0, 200)}`)
@@ -335,15 +654,22 @@ export function Testing({ store }: { store: Store }) {
           if (postError) store.setTestingError(postError)
           await Promise.all([waitForRunCompletion(runIds), refreshRuns()])
         }
-      } else {
-        // No emitted events means no action path for automation.
-        await refreshRuns()
       }
+      // No emitted events means no action path for automation — nothing
+      // could have started a run, so there's nothing worth polling for.
+      // Skipping this in the common (no-detection) case matters a lot in
+      // live mode: the old unconditional 3x/900ms poll kept `busy` true for
+      // ~1.8s of dead time on every quiet frame, well past the analysis
+      // interval, which made the loop look permanently "stuck calling the
+      // vision model" even though it was landing results the whole time.
     } catch (e) {
       runError =
-        `Could not reach the perception detect API at ${PERCEPTION_URL}. ` +
-          `Start it (from the repo root) with:  python -m perception.server` +
-          `\n(${e instanceof Error ? e.message : String(e)})`
+        e instanceof Error && e.name === 'TimeoutError'
+          ? `Vision model call timed out after ${DETECT_TIMEOUT_MS / 1000}s — the upstream model API is slow ` +
+            `right now. Moving on to the next frame.`
+          : `Could not reach the perception detect API at ${PERCEPTION_URL}. ` +
+            `Start it (from the repo root) with:  python -m perception.server` +
+            `\n(${e instanceof Error ? e.message : String(e)})`
       store.setTestingError(runError)
     } finally {
       store.finishTestingRun({
@@ -367,7 +693,7 @@ export function Testing({ store }: { store: Store }) {
               'flex min-h-52 cursor-pointer items-center justify-center overflow-hidden rounded-lg border-2 border-dashed transition-colors',
               dragging ? 'border-primary bg-primary/5' : 'hover:border-muted-foreground/40',
             )}
-            onClick={() => !preview && inputRef.current?.click()}
+            onClick={() => !preview && !liveStreaming && !browserStream && inputRef.current?.click()}
             onDragOver={(e) => {
               e.preventDefault()
               setDragging(true)
@@ -379,7 +705,17 @@ export function Testing({ store }: { store: Store }) {
               pick(e.dataTransfer.files?.[0])
             }}
           >
-            {preview && isVideo ? (
+            {browserStream ? (
+              <video
+                ref={videoRef}
+                autoPlay
+                muted
+                playsInline
+                className="max-h-72 w-full object-contain"
+              />
+            ) : liveStreaming && selectedCam ? (
+              <LiveCameraStream cameraId={selectedCam.id} />
+            ) : preview && isVideo ? (
               <video
                   src={preview}
                   controls
@@ -428,6 +764,90 @@ export function Testing({ store }: { store: Store }) {
               </Button>
             </div>
           )}
+
+          {liveCameras.length > 0 && (
+            <div className="flex flex-col gap-2 rounded-lg border border-border/60 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <Label>Or use a live camera for testing</Label>
+                {selectedCam && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Live</span>
+                    <Switch
+                      checked={liveStreaming}
+                      onCheckedChange={(v) => {
+                        if (v) stopBrowserCamera() // only one live source analyzed at a time
+                        setLiveStreaming(v)
+                      }}
+                      aria-label="Stream live preview"
+                    />
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <select
+                  value={cameraId}
+                  onChange={(e) => setCameraId(e.target.value)}
+                  className="h-10 flex-1 rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  {liveCameras.map((camera) => (
+                    <option key={camera.id} value={camera.id}>
+                      {camera.name} ({camera.zone})
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  variant="secondary"
+                  disabled={!canRunFromCamera || busy || liveStreaming}
+                  onClick={runFromCamera}
+                >
+                  Grab frame and run
+                </Button>
+              </div>
+              {liveStreaming && selectedCam ? (
+                <p className="text-xs text-muted-foreground">
+                  Preview above streams continuously (~8 fps). Analysis isn't pinned to any fps —
+                  it grabs a fresh screenshot as soon as the previous one finishes, so it goes as
+                  fast as the vision model can respond.
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Grabs one snapshot from the selected live camera and sends it to the same
+                  testing detector. Toggle Live to stream continuously and analyze back-to-back.
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2 rounded-lg border border-border/60 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <Label>Or use your own camera</Label>
+              {browserStream && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Live</span>
+                  <Switch
+                    checked={browserLive}
+                    onCheckedChange={setBrowserLive}
+                    aria-label="Analyze from browser camera"
+                  />
+                </div>
+              )}
+            </div>
+            {browserError && (
+              <div className="whitespace-pre-wrap rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+                {browserError}
+              </div>
+            )}
+            <Button
+              variant="secondary"
+              onClick={browserStream ? stopBrowserCamera : startBrowserCamera}
+            >
+              {browserStream ? 'Stop camera' : 'Use my camera'}
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              Uses your browser's camera permission (getUserMedia) — this works from any device,
+              not just this machine. Toggle Live to analyze back-to-back once it's on.
+            </p>
+          </div>
 
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3">
@@ -503,7 +923,7 @@ export function Testing({ store }: { store: Store }) {
             </div>
           )}
 
-          <Button variant="olive" disabled={!canRun || busy} onClick={run}>
+          <Button variant="olive" disabled={!canRunFromUpload || busy} onClick={() => run()}>
             {busy ? 'Running detection…' : discover ? 'Discover events' : 'Run detection'}
           </Button>
         </CardContent>
@@ -513,30 +933,53 @@ export function Testing({ store }: { store: Store }) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <CardTitle>Results</CardTitle>
-          {result && <Badge variant="secondary">{result.mock ? 'mock' : result.model}</Badge>}
+          {showLiveResults
+            ? liveResult && <Badge variant="secondary">{liveResult.mock ? 'mock' : liveResult.model}</Badge>
+            : result && <Badge variant="secondary">{result.mock ? 'mock' : result.model}</Badge>}
         </CardHeader>
         <CardContent>
-          {error && (
-            <div className="whitespace-pre-wrap rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
-              {error}
-            </div>
-          )}
+          {showLiveResults ? (
+            <>
+              {liveError && (
+                <div className="mb-3 whitespace-pre-wrap rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+                  {liveError}
+                </div>
+              )}
+              {!liveResult && (
+                <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" /> waiting for the first frame…
+                </div>
+              )}
+              {liveResult && <VideoResults r={liveResult} minConf={minConf} />}
+              {liveBusy && liveResult && (
+                <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="size-3 animate-spin" /> analyzing next frame…
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {error && (
+                <div className="whitespace-pre-wrap rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+                  {error}
+                </div>
+              )}
 
-          {!error && !result && !busy && (
-            <div className="py-8 text-center text-sm text-muted-foreground">
-              Upload an image or video and run detection to see per-event verdicts and the events
-              that would fire.
-            </div>
-          )}
+              {!error && !result && !busy && (
+                <div className="py-8 text-center text-sm text-muted-foreground">
+                  Upload an image or video and run detection to see per-event verdicts and the events
+                  that would fire.
+                </div>
+              )}
 
-          {busy && (
-            <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />{' '}
-              {isVideo ? 'sampling frames and calling the model…' : 'calling the vision model…'}
-            </div>
-          )}
+              {busy && (
+                <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />{' '}
+                  {isVideo ? 'sampling frames and calling the model…' : 'calling the vision model…'}
+                </div>
+              )}
 
-          {result && result.kind === 'video' && <VideoResults r={result} minConf={minConf} />}
+              {result && result.kind === 'video' && <VideoResults r={result} minConf={minConf} />}
 
           {result && result.kind !== 'video' && (
             <div className="flex flex-col gap-5">
@@ -601,10 +1044,60 @@ export function Testing({ store }: { store: Store }) {
                   <EventsBlock events={result.events ?? []} />
             </div>
           )}
+            </>
+          )}
         </CardContent>
       </Card>
     </div>
   )
+}
+
+// Ticks its own state on an interval so the smooth preview doesn't re-render
+// the whole Testing page.
+function LiveCameraStream({ cameraId }: { cameraId: string }) {
+  const [tick, setTick] = useState(() => Date.now())
+
+  useEffect(() => {
+    // ~8fps matches the perception service's own preview refresh rate
+    // (capture.py _PREVIEW_HZ) — polling faster just re-fetches a stale JPEG.
+    const t = setInterval(() => setTick(Date.now()), 125)
+    return () => clearInterval(t)
+  }, [cameraId])
+
+  return (
+    <img
+      src={`${cameraSnapshotUrl(cameraId)}?t=${tick}`}
+      alt="live camera preview"
+      className="max-h-72 w-full rounded-lg border object-contain"
+    />
+  )
+}
+
+// Aggregates a live-mode frame timeline into the same SummaryRow shape
+// /detect_video returns, so the live view can reuse VideoResults as-is.
+function computeLiveSummary(frames: FrameResult[], minConf: number): SummaryRow[] {
+  const byType = new Map<string, SummaryRow>()
+  for (const frame of frames) {
+    for (const v of frame.verdicts) {
+      const row = byType.get(v.event_type) ?? {
+        event_type: v.event_type,
+        fired: false,
+        frames_detected: 0,
+        frames_total: 0,
+        peak_confidence: 0,
+        count: null,
+      }
+      if (v.detected) {
+        row.frames_detected += 1
+        if ((v.confidence ?? 0) >= minConf) row.fired = true
+      }
+      row.peak_confidence = Math.max(row.peak_confidence, v.confidence ?? 0)
+      if (typeof v.count === 'number') row.count = v.count
+      byType.set(v.event_type, row)
+    }
+  }
+  for (const row of byType.values()) row.frames_total = frames.length
+  return [...byType.values()].sort((a, b) => b.peak_confidence - a.peak_confidence)
 }
 
 function parseResultEvents(raw: Record<string, unknown>[]): AppEvent[] {

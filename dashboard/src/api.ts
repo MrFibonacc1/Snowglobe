@@ -15,7 +15,14 @@ export const PERCEPTION_URL =
 
 const TIMEOUT_MS = 3000
 
-class ApiError extends Error {}
+export class ApiError extends Error {
+  status?: number
+  constructor(message: string, status?: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   if (!AUTOMATION_URL) throw new ApiError('VITE_AUTOMATION_URL not set')
@@ -35,7 +42,10 @@ async function request<T>(base: string, path: string, init?: RequestInit): Promi
   })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
-    throw new ApiError(`${init?.method ?? 'GET'} ${path} → ${res.status} ${body.slice(0, 200)}`)
+    throw new ApiError(
+      `${init?.method ?? 'GET'} ${path} → ${res.status} ${body.slice(0, 200)}`,
+      res.status,
+    )
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T

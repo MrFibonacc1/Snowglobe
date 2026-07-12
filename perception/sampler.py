@@ -20,8 +20,21 @@ class Frame:
 
 
 def resolve_source(source: str):
-    """'webcam' or a bare integer → camera index; anything else → URL / path."""
+    """'webcam' or a bare integer → camera index; anything else → URL / path.
+
+    For plain `webcam`, prefer a non-default index first (typically 1 for a
+    connected external/phone camera) and fall back to 0. This keeps behavior
+    compatible with single-camera setups while allowing iPhone camera-first setups
+    without requiring manual index entry.
+    """
     if source == "webcam":
+        for idx in (1, 0):
+            cap = cv2.VideoCapture(idx)
+            try:
+                if cap.isOpened():
+                    return idx
+            finally:
+                cap.release()
         return 0
     if source.isdigit():
         return int(source)
