@@ -3,6 +3,8 @@
 > Any security camera, turned into an agent that sees an incident and does the
 > follow-up work on its own.
 
+DEMO LINK: https://drive.google.com/drive/u/0/folders/1jKG0L264MWp1P_zmIUpUiG5AorFQLx66
+
 Snowglobe watches a space through an ordinary security camera, understands what
 is happening, and reacts by driving real software: filling out web forms,
 updating spreadsheets, and posting to Slack.
