@@ -42,18 +42,26 @@ response as an ordered set of steps.
 A spill spreads near the loading bay. Snowglobe sees it, files a facilities
 incident in the web portal, logs it to a Google Sheet, and pings the manager in
 Slack. An item comes off a shelf and stock runs low. Snowglobe counts it,
-adjusts inventory, and drafts a reorder. Both flows are seeded and running the
-moment you open the dashboard.
+adjusts inventory, and drafts a reorder. Both ship as built-in automations, so
+the system does useful work the moment it starts.
 
 ## Demo
 
-Start it with `make up` and open the dashboard at `http://localhost:5173`. It
-ships with seeded workflows, so within seconds you see events land in the live
-feed and agent runs execute step by step. Fire your own from the Testing page,
-or drop a clip on the perception service to watch it name events in real time.
+Point a camera at the space. Perception runs each frame through NVIDIA's vision
+reasoner, and the moment it sees a spill or an empty shelf the workflow engine
+fires: the H Company agent opens the facilities form and fills it in the way a
+person would, Composio writes the row to Google Sheets, and the manager gets a
+Slack message. Every step streams into the dashboard as it happens.
 
-Nothing needs an API key to try: every external service has a mock, so the whole
-pipeline runs offline and still produces live runs you can watch.
+Run it with `make up` and open `http://localhost:5173`. The dashboard comes with
+example workflows already wired, so you can trigger one right away from the
+Testing page or by dropping in a clip, then watch the run go end to end: the
+trigger matches, the agent takes over the browser, the sheet updates, the alert
+sends.
+
+You can walk the whole flow before adding any API keys, since each service ships
+with a stub. Add your NVIDIA, H Company, and Composio keys and the same runs
+execute against the live services.
 
 ## How it works
 
@@ -151,9 +159,9 @@ optional LAN camera gateway with
 
 ## Configuration
 
-Everything runs in mock mode with no credentials, which is enough to demo the
-full pipeline. To wire up the real services, copy each `.env.example` and fill in
-the keys you have:
+Snowglobe runs without any credentials so you can try it right away; each
+integration falls back to a stub until you add its key. To connect the live
+services, copy each `.env.example` and fill in the keys you have:
 
 - `perception/.env`: `NVIDIA_API_KEY` for the vision reasoner (or run with
   `--mock`). `GROUNDING_ENABLED` toggles local YOLO.
