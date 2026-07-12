@@ -75,6 +75,9 @@ def _run_agent_api(config: dict) -> dict:
 
     headers = {"Authorization": f"Bearer {api_key}"}
     started = time.time()
+    # Long missions can override the global budget per step:
+    # config {"timeout_sec": 1200} → wait up to 20 min for this one task.
+    budget = int(config.get("timeout_sec", TIMEOUT_SEC))
 
     with httpx.Client(base_url=AGENT_BASE_URL, headers=headers, timeout=30) as client:
         resp = client.post(
@@ -91,7 +94,7 @@ def _run_agent_api(config: dict) -> dict:
 
         # Poll until the session finishes or we hit our time budget.
         last = session
-        while time.time() - started < TIMEOUT_SEC:
+        while time.time() - started < budget:
             time.sleep(POLL_SEC)
             r = client.get(f"/sessions/{session_id}")
             r.raise_for_status()
@@ -131,6 +134,7 @@ def _run_nemoclaw(config: dict) -> dict:
     text = f"Go to {url}. {instructions}" if url else instructions
 
     started = time.time()
+    budget = int(config.get("timeout_sec", TIMEOUT_SEC))
     with httpx.Client(timeout=30) as client:
         resp = client.post(
             NEMOCLAW_A2A_URL,
@@ -157,7 +161,7 @@ def _run_nemoclaw(config: dict) -> dict:
         task_id = result.get("id")
         state = ((result.get("status") or {}).get("state") or "submitted").lower()
         last = result
-        while state in _A2A_RUNNING and time.time() - started < TIMEOUT_SEC:
+        while state in _A2A_RUNNING and time.time() - started < budget:
             time.sleep(POLL_SEC)
             r = client.post(
                 NEMOCLAW_A2A_URL,
