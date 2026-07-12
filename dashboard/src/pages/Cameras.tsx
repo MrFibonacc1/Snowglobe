@@ -1,6 +1,8 @@
-import { useState } from 'react'
-import type { Store } from '../store'
+import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
+import type { NewCamera, Store } from '../store'
 import type { Camera, CameraSource, EventType } from '../types'
+import { cameraSnapshotUrl } from '../api'
 import { SUGGESTED_EVENT_TYPES, eventMeta, SOURCE_LABEL } from '../constants'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -57,9 +59,18 @@ export function Cameras({ store }: { store: Store }) {
       {adding && (
         <AddCameraDialog
           onClose={() => setAdding(false)}
-          onAdd={(c) => {
-            store.addCamera(c)
+          onAdd={async (c) => {
             setAdding(false)
+            const { online } = await store.connectCamera(c)
+            if (online) {
+              toast.success(`Connecting "${c.name}"`, {
+                description: 'The perception service is sampling this feed.',
+              })
+            } else {
+              toast.error('Perception service offline', {
+                description: `Added "${c.name}" locally — it will simulate until the backend is reachable.`,
+              })
+            }
           }}
         />
       )}
@@ -76,22 +87,44 @@ function EmptyState({ children }: { children: React.ReactNode }) {
 }
 
 function CameraCard({ cam, store }: { cam: Camera; store: Store }) {
-  const [snapBroken, setSnapBroken] = useState(false)
-  // Latest event from this camera's zone that carries a frame — the closest
-  // thing to a live preview without streaming video into the browser.
-  const snap = store.events.find(
+  const [eventBroken, setEventBroken] = useState(false)
+  const [liveBroken, setLiveBroken] = useState(false)
+  // Cache-busting tick that advances ~once per second while the camera is live,
+  // so the perception snapshot below refreshes as a lightweight video preview.
+  const [tick, setTick] = useState(() => Date.now())
+
+  const isLive = cam.status === 'live'
+
+  useEffect(() => {
+    if (!isLive) return
+    setLiveBroken(false) // give the feed a fresh chance whenever it goes live
+    // Perception samples at ~0.3fps, so latest.jpg 404s for the first few
+    // seconds. Retry every tick — clear liveBroken before bumping the cache
+    // key — so a transient 404 can't permanently kill the preview.
+    const t = setInterval(() => {
+      setLiveBroken(false)
+      setTick(Date.now())
+    }, 1000)
+    return () => clearInterval(t)
+  }, [isLive])
+
+  // Prefer the live sampled frame; fall back to the latest zone event frame,
+  // then to the camera-icon placeholder — always something to show.
+  const eventSnap = store.events.find(
     (e) => e.location === cam.zone && e.snapshot_url,
   )?.snapshot_url
+  const liveSnap = isLive && !liveBroken ? `${cameraSnapshotUrl(cam.id)}?t=${tick}` : undefined
+  const snap = liveSnap ?? (eventBroken ? undefined : eventSnap)
 
   return (
     <Card className="overflow-hidden pt-0">
       <div className="relative flex h-36 items-center justify-center overflow-hidden bg-gradient-to-br from-muted to-background text-muted-foreground">
-        {snap && !snapBroken && (
+        {snap && (
           <img
             src={snap}
             alt=""
             className="absolute inset-0 h-full w-full object-cover"
-            onError={() => setSnapBroken(true)}
+            onError={() => (liveSnap ? setLiveBroken(true) : setEventBroken(true))}
           />
         )}
         {cam.status === 'live' && (
@@ -103,7 +136,7 @@ function CameraCard({ cam, store }: { cam: Camera; store: Store }) {
             {cam.status}
           </Badge>
         </div>
-        {(!snap || snapBroken) && <CameraIcon className="size-8 opacity-40" />}
+        {!snap && <CameraIcon className="size-8 opacity-40" />}
         <div className="absolute bottom-3 right-3 rounded bg-background/70 px-1.5 py-0.5 text-xs tabular-nums">
           {cam.fps} fps
         </div>
@@ -133,8 +166,12 @@ function CameraCard({ cam, store }: { cam: Camera; store: Store }) {
           ))}
         </div>
         <div className="mt-1 flex items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={() => store.toggleCamera(cam.id)}>
-            {cam.status === 'live' ? 'Pause' : 'Resume'}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => (isLive ? store.pauseCamera(cam.id) : store.resumeCamera(cam.id))}
+          >
+            {isLive ? 'Pause' : 'Resume'}
           </Button>
           <Button
             variant="ghost"
@@ -156,7 +193,7 @@ function AddCameraDialog({
   onAdd,
 }: {
   onClose: () => void
-  onAdd: (c: Omit<Camera, 'id' | 'eventsToday'>) => void
+  onAdd: (c: NewCamera) => void
 }) {
   const [name, setName] = useState('')
   const [zone, setZone] = useState('zone_a')
@@ -284,7 +321,6 @@ function AddCameraDialog({
                 zone: zone.trim(),
                 source,
                 url: needsUrl ? url.trim() : undefined,
-                status: 'connecting',
                 fps: 1,
                 detects,
               })

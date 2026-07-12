@@ -19,12 +19,14 @@ from datetime import datetime, timezone
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, Field
 
 from . import emit as emit_mod
 from . import vlm as vlm_mod
+from .capture import CameraRegistry
 from .config import Config
 from .sampler import Frame, sample_frames
 
@@ -38,6 +40,13 @@ app.add_middleware(
 
 _cfg = Config.from_env()
 _detectors: dict[bool, object] = {}
+_cameras = CameraRegistry(_cfg)
+
+
+@app.on_event("shutdown")
+def _shutdown_cameras():
+    """Stop every capture worker cleanly when the app goes down."""
+    _cameras.shutdown()
 
 
 def _detector(mock: bool):
@@ -295,6 +304,82 @@ async def detect_video(
         "fps": fps, "frames_analyzed": len(frames),
         "frames": frames_out, "summary": summary, "events": events_out,
     }
+
+
+class CameraCreate(BaseModel):
+    """Request body for POST /cameras. `source` accepts "webcam", an integer
+    index string, an rtsp:// or http(s):// URL, or a file path."""
+
+    name: str
+    source: str
+    zone: str
+    # Sampling rate must be a positive, sane value: fps <= 0 would busy-spin the
+    # worker / fire the VLM with no throttle; an absurd upper value would hammer
+    # it. Out-of-range values return 422.
+    fps: float = Field(default=0.3, gt=0, le=30)
+    events: list[str] = []
+    mock: bool = False
+    automation_url: str | None = None  # optional override; defaults to Config
+
+
+@app.post("/cameras", status_code=201)
+def create_camera(body: CameraCreate):
+    """Create and start a live-capture worker; returns its state object."""
+    return _cameras.create(
+        name=body.name,
+        source=body.source,
+        zone=body.zone,
+        fps=body.fps,
+        events=body.events,
+        mock=body.mock,
+        automation_url=body.automation_url,
+    )
+
+
+@app.get("/cameras")
+def list_cameras():
+    return _cameras.list()
+
+
+@app.get("/cameras/{cam_id}")
+def get_camera(cam_id: str):
+    state = _cameras.get(cam_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="unknown camera")
+    return state
+
+
+@app.post("/cameras/{cam_id}/pause")
+def pause_camera(cam_id: str):
+    state = _cameras.pause(cam_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="unknown camera")
+    return state
+
+
+@app.post("/cameras/{cam_id}/resume")
+def resume_camera(cam_id: str):
+    state = _cameras.resume(cam_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="unknown camera")
+    return state
+
+
+@app.delete("/cameras/{cam_id}", status_code=204)
+def delete_camera(cam_id: str):
+    if not _cameras.delete(cam_id):
+        raise HTTPException(status_code=404, detail="unknown camera")
+    return Response(status_code=204)
+
+
+@app.get("/cameras/{cam_id}/latest.jpg")
+def camera_latest(cam_id: str):
+    if _cameras.get(cam_id) is None:
+        raise HTTPException(status_code=404, detail="unknown camera")
+    jpeg = _cameras.latest_jpeg(cam_id)
+    if jpeg is None:
+        raise HTTPException(status_code=404, detail="no frame sampled yet")
+    return Response(content=jpeg, media_type="image/jpeg")
 
 
 def main():
