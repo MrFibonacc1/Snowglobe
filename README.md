@@ -1,9 +1,20 @@
 # Snowglobe
 
-Snowglobe watches a space through an ordinary security camera, understands what
-is happening, and reacts by driving real software. It fills out web forms,
-updates spreadsheets, and posts to Slack on its own, with no human at the
-monitor.
+Every shop, warehouse, and lobby already runs cameras. They record everything
+and act on nothing. Someone still has to watch a wall of monitors, or scrub the
+footage after the incident already happened, and then do the real work by hand:
+file the facilities ticket, update the inventory sheet, reorder the stock,
+message the manager. Usually no one is watching, so the spill sits, the shelf
+stays empty, and the hazard goes unlogged until it turns into a problem.
+
+The follow-up is the bottleneck. It has to happen every time, within seconds,
+and today a person has to be watching for it to happen at all. That work,
+clicking through a portal or updating a sheet, is exactly what a computer-use
+agent is good at.
+
+Snowglobe closes the gap. It watches a space through an ordinary security
+camera, understands what is happening, and reacts by driving real software:
+filling out web forms, updating spreadsheets, and posting to Slack on its own.
 
 A spill spreads near the loading bay. Snowglobe sees it, files a facilities
 incident in the web portal, logs it to a Google Sheet, and pings the manager in
