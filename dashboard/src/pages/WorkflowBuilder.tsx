@@ -4,7 +4,6 @@ import {
   ReactFlow,
   Background,
   Controls,
-  MiniMap,
   Handle,
   Position,
   MarkerType,
@@ -403,7 +402,7 @@ function clone<T>(v: T): T {
 // (engine runs a linear chain). Node.data holds the trigger/step config.
 
 const NODE_DX = 240
-const EDGE_OPTS = { animated: true, markerEnd: { type: MarkerType.ArrowClosed } }
+const EDGE_OPTS = { animated: false, markerEnd: { type: MarkerType.ArrowClosed } }
 const NODE_TYPES = { trigger: TriggerNode, step: StepNode }
 
 function TriggerNode({ data, selected }: NodeProps) {
@@ -635,16 +634,15 @@ function EditorDialog({
         <div className="flex min-h-0 flex-1">
           {/* Canvas */}
           <div className="relative min-w-0 flex-1">
-            <div className="absolute left-3 top-3 z-10 flex flex-wrap items-center gap-1.5 rounded-lg border bg-background/90 p-1.5 backdrop-blur">
-              <span className="px-1 text-xs text-muted-foreground">Add step:</span>
-              {STEP_TYPES.map((st) => {
-                const I = st.icon
-                return (
-                  <Button key={st.id} variant="secondary" size="sm" className="h-7 gap-1" onClick={() => addStep(st.id)}>
-                    <I className="size-3.5" /> {st.label}
-                  </Button>
-                )
-              })}
+            <div className="absolute left-3 top-3 z-10">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-8 gap-1.5 shadow-sm"
+                onClick={() => addStep('composio')}
+              >
+                <Plus className="size-4" /> Add step
+              </Button>
             </div>
             <ReactFlow
               nodes={nodes}
@@ -657,12 +655,11 @@ function EditorDialog({
               onNodeClick={(_, n) => setSelected(n.id)}
               defaultEdgeOptions={EDGE_OPTS}
               fitView
-              fitViewOptions={{ padding: 0.3 }}
-              onInit={(inst) => setTimeout(() => inst.fitView({ padding: 0.3 }), 90)}
+              fitViewOptions={{ padding: 0.35 }}
+              onInit={(inst) => setTimeout(() => inst.fitView({ padding: 0.35 }), 90)}
             >
-              <Background />
-              <Controls />
-              <MiniMap pannable zoomable />
+              <Background gap={22} size={1} color="var(--border)" />
+              <Controls showInteractive={false} className="!shadow-none" />
             </ReactFlow>
           </div>
 
