@@ -267,16 +267,31 @@ async def get_audio(name: str):
     return FileResponse(path)
 
 
+@app.post("/integrations/composio/{toolkit}/connect")
+async def connect_composio(toolkit: str):
+    """Start a Composio OAuth link and return the URL the user opens to
+    authorize. The dashboard opens it in a new tab, then polls /status until
+    the toolkit flips to connected."""
+    try:
+        return await asyncio.to_thread(composio_status.initiate_connection, toolkit)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001 — surface Composio's reason to the UI
+        raise HTTPException(status_code=502, detail=f"Composio could not start the link: {exc}")
+
+
 @app.get("/status")
-async def status():
-    """Real integration state for the dashboard — booleans only, never values."""
+async def status(refresh: bool = False):
+    """Real integration state for the dashboard — booleans only, never values.
+    Pass ?refresh=1 to bypass the 60s Composio cache (used right after a
+    connect so the card flips promptly)."""
     return {
         "h_agent": {
             "mode": os.environ.get("H_AGENT_MODE", "mock"),
             "key_present": bool(os.environ.get("HAI_API_KEY")),
             "region": os.environ.get("HAI_AGENT_REGION", "eu"),
         },
-        "composio": await asyncio.to_thread(composio_status.get_composio_status),
+        "composio": await asyncio.to_thread(composio_status.get_composio_status, refresh),
         "gradium": {"configured": bool(os.environ.get("GRADIUM_API_KEY"))},
         "nemoclaw": {
             "url": os.environ.get("NEMOCLAW_A2A_URL", "http://localhost:8123"),
