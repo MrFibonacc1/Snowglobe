@@ -266,6 +266,8 @@ function EditorDialog({
   onSave: (wf: Workflow) => void
 }) {
   const [wf, setWf] = useState<Workflow>(initial)
+  // Which node the right pane edits: 'trigger' or a step id.
+  const [selected, setSelected] = useState<string>('trigger')
   const valid = wf.name.trim().length > 0 && wf.steps.length > 0
 
   const setTrigger = (patch: Partial<Workflow['trigger']>) =>
@@ -285,17 +287,19 @@ function EditorDialog({
       ),
     }))
 
-  const addStep = () =>
+  const addStep = () => {
+    const id = newStepId()
     setWf((w) => ({
       ...w,
-      steps: [
-        ...w.steps,
-        { id: newStepId(), type: 'composio', config: defaultConfig('composio') },
-      ],
+      steps: [...w.steps, { id, type: 'composio', config: defaultConfig('composio') }],
     }))
+    setSelected(id)
+  }
 
-  const removeStep = (id: string) =>
+  const removeStep = (id: string) => {
     setWf((w) => ({ ...w, steps: w.steps.filter((s) => s.id !== id) }))
+    setSelected((sel) => (sel === id ? 'trigger' : sel))
+  }
 
   const moveStep = (idx: number, dir: -1 | 1) =>
     setWf((w) => {
@@ -311,163 +315,186 @@ function EditorDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[92vh] gap-0 overflow-hidden p-0 sm:max-w-4xl">
+      <DialogContent className="max-h-[92vh] gap-0 overflow-hidden p-0 sm:max-w-5xl">
         <DialogHeader className="border-b p-5">
           <DialogTitle>{isNew ? 'New workflow' : 'Edit workflow'}</DialogTitle>
           <DialogDescription>
-            A trigger plus an ordered list of steps the engine runs when a matching event fires.
+            Click a node to edit it. The engine runs the steps top to bottom when a matching event fires.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="max-h-[64vh] overflow-y-auto p-5">
-          <Field label="Name">
-            <Input
-              value={wf.name}
-              onChange={(e) => setWf((w) => ({ ...w, name: e.target.value }))}
-              placeholder="e.g. Spill → incident report"
-              autoFocus
-            />
-          </Field>
+        <div className="grid max-h-[66vh] grid-cols-[minmax(0,300px)_1fr] divide-x">
+          {/* Left: visual flow rail */}
+          <div className="overflow-y-auto p-5">
+            <Field label="Name">
+              <Input
+                value={wf.name}
+                onChange={(e) => setWf((w) => ({ ...w, name: e.target.value }))}
+                placeholder="e.g. Spill → incident report"
+                autoFocus
+              />
+            </Field>
 
-          <div className="mt-5 grid gap-6 md:grid-cols-[minmax(0,320px)_1fr]">
-            {/* Trigger */}
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col gap-2">
-                <Label>Trigger event</Label>
-                <div className="flex flex-wrap gap-1.5">
-                  <PillToggle
-                    selected={wf.trigger.event_type === '*'}
-                    onClick={() => setTrigger({ event_type: '*' })}
-                  >
-                    <EventIcon type="*" className="size-3.5" /> Any event
-                  </PillToggle>
-                  {[...new Set([...SUGGESTED_EVENT_TYPES, wf.trigger.event_type])]
-                    .filter((t) => t && t !== '*')
-                    .map((t) => (
-                      <PillToggle
-                        key={t}
-                        selected={wf.trigger.event_type === t}
-                        onClick={() => setTrigger({ event_type: t })}
-                      >
-                        <EventIcon type={t} className="size-3.5" /> {eventMeta(t).label}
-                      </PillToggle>
-                    ))}
-                </div>
-                <Input
-                  value={wf.trigger.event_type === '*' ? '' : wf.trigger.event_type}
-                  onChange={(e) => {
-                    const slug = e.target.value
-                      .toLowerCase()
-                      .replace(/[^a-z0-9]+/g, '_')
-                      .replace(/^_+|_+$/g, '')
-                    setTrigger({ event_type: slug || '*' })
-                  }}
-                  placeholder="or type a custom event, e.g. blocked_exit"
-                  className="mt-1"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Event types are open-ended. Type any concern the perception
-                  model can surface, or match every event.
-                </p>
-              </div>
-              <Field label="Zone filter (optional)">
-                <Input
-                  value={wf.trigger.zone ?? ''}
-                  onChange={(e) => setTrigger({ zone: e.target.value.trim() || undefined })}
-                  placeholder="any zone"
-                />
-              </Field>
-              <div className="flex flex-col gap-2">
-                <Label>Min confidence, {Math.round(wf.trigger.min_confidence * 100)}%</Label>
-                <Slider
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={[wf.trigger.min_confidence]}
-                  onValueChange={([v]) => setTrigger({ min_confidence: v })}
-                />
-              </div>
-              <Field label="Cooldown (seconds)" hint="At most one run per (workflow, zone) per window.">
-                <Input
-                  type="number"
-                  min={0}
-                  value={wf.trigger.cooldown_sec}
-                  onChange={(e) =>
-                    setTrigger({ cooldown_sec: Math.max(0, Number(e.target.value) || 0) })
-                  }
-                />
-              </Field>
+            <div className="mt-5 flex flex-col">
+              {/* Trigger node */}
+              <FlowNode
+                selected={selected === 'trigger'}
+                onClick={() => setSelected('trigger')}
+                icon={<EventIcon type={wf.trigger.event_type} className="size-4" />}
+                color={eventMeta(wf.trigger.event_type).color}
+                kicker="WHEN"
+                title={
+                  wf.trigger.event_type === '*'
+                    ? 'Any event'
+                    : eventMeta(wf.trigger.event_type).label
+                }
+                sub={`${wf.trigger.zone ?? 'any zone'} · ≥${Math.round(
+                  wf.trigger.min_confidence * 100,
+                )}%`}
+              />
+
+              {wf.steps.map((step, idx) => {
+                const meta = STEP_META[step.type]
+                const StepIco = meta?.icon ?? Bot
+                return (
+                  <div key={step.id} className="flex flex-col">
+                    <Connector />
+                    <FlowNode
+                      selected={selected === step.id}
+                      onClick={() => setSelected(step.id)}
+                      icon={<StepIco className="size-4" />}
+                      kicker={idx === 0 ? 'THEN' : 'AND'}
+                      title={`${idx + 1}. ${meta?.label ?? step.type}`}
+                      sub={stepSummary(step)}
+                    />
+                  </div>
+                )
+              })}
+
+              <Connector />
+              <button
+                type="button"
+                onClick={addStep}
+                className="flex items-center justify-center gap-1.5 rounded-lg border border-dashed py-2.5 text-sm text-muted-foreground transition hover:border-primary/50 hover:text-foreground"
+              >
+                <Plus className="size-4" /> Add step
+              </button>
             </div>
+          </div>
 
-            {/* Steps */}
-            <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-between">
-                <Label className="text-muted-foreground">Steps ({wf.steps.length})</Label>
-                <Button variant="secondary" size="sm" className="gap-1.5" onClick={addStep}>
-                  <Plus className="size-3.5" /> Add step
-                </Button>
+          {/* Right: config for the selected node */}
+          <div className="overflow-y-auto p-5">
+            {selected === 'trigger' ? (
+              <div className="flex flex-col gap-4">
+                <h3 className="text-sm font-semibold">Trigger</h3>
+                <div className="flex flex-col gap-2">
+                  <Label>Trigger event</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    <PillToggle
+                      selected={wf.trigger.event_type === '*'}
+                      onClick={() => setTrigger({ event_type: '*' })}
+                    >
+                      <EventIcon type="*" className="size-3.5" /> Any event
+                    </PillToggle>
+                    {[...new Set([...SUGGESTED_EVENT_TYPES, wf.trigger.event_type])]
+                      .filter((t) => t && t !== '*')
+                      .map((t) => (
+                        <PillToggle
+                          key={t}
+                          selected={wf.trigger.event_type === t}
+                          onClick={() => setTrigger({ event_type: t })}
+                        >
+                          <EventIcon type={t} className="size-3.5" /> {eventMeta(t).label}
+                        </PillToggle>
+                      ))}
+                  </div>
+                  <Input
+                    value={wf.trigger.event_type === '*' ? '' : wf.trigger.event_type}
+                    onChange={(e) => {
+                      const slug = e.target.value
+                        .toLowerCase()
+                        .replace(/[^a-z0-9]+/g, '_')
+                        .replace(/^_+|_+$/g, '')
+                      setTrigger({ event_type: slug || '*' })
+                    }}
+                    placeholder="or type a custom event, e.g. blocked_exit"
+                    className="mt-1"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Event types are open-ended. Type any concern the perception
+                    model can surface, or match every event.
+                  </p>
+                </div>
+                <Field label="Zone filter (optional)">
+                  <Input
+                    value={wf.trigger.zone ?? ''}
+                    onChange={(e) => setTrigger({ zone: e.target.value.trim() || undefined })}
+                    placeholder="any zone"
+                  />
+                </Field>
+                <div className="flex flex-col gap-2">
+                  <Label>Min confidence, {Math.round(wf.trigger.min_confidence * 100)}%</Label>
+                  <Slider
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={[wf.trigger.min_confidence]}
+                    onValueChange={([v]) => setTrigger({ min_confidence: v })}
+                  />
+                </div>
+                <Field label="Cooldown (seconds)" hint="At most one run per (workflow, zone) per window.">
+                  <Input
+                    type="number"
+                    min={0}
+                    value={wf.trigger.cooldown_sec}
+                    onChange={(e) =>
+                      setTrigger({ cooldown_sec: Math.max(0, Number(e.target.value) || 0) })
+                    }
+                  />
+                </Field>
               </div>
-
-              {wf.steps.map((step, idx) => (
-                <div key={step.id} className="rounded-lg border bg-card/50 p-3">
-                  <div className="flex items-center gap-2">
-                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-                      {idx + 1}
-                    </span>
+            ) : (
+              (() => {
+                const idx = wf.steps.findIndex((s) => s.id === selected)
+                const step = wf.steps[idx]
+                if (!step) return null
+                return (
+                  <div className="flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold">Step {idx + 1}</h3>
+                      <div className="flex items-center">
+                        <Button variant="ghost" size="icon" className="size-7"
+                          onClick={() => moveStep(idx, -1)} disabled={idx === 0} aria-label="Move up">
+                          <ChevronUp className="size-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="size-7"
+                          onClick={() => moveStep(idx, 1)} disabled={idx === wf.steps.length - 1} aria-label="Move down">
+                          <ChevronDown className="size-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon"
+                          className="size-7 text-muted-foreground hover:text-destructive"
+                          onClick={() => removeStep(step.id)} disabled={wf.steps.length === 1} aria-label="Remove step">
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </div>
+                    </div>
                     <div className="flex flex-wrap gap-1.5">
                       {STEP_TYPES.map((st) => {
                         const StepIco = st.icon
                         return (
-                          <PillToggle
-                            key={st.id}
-                            selected={step.type === st.id}
-                            onClick={() => changeStepType(step.id, st.id)}
-                          >
+                          <PillToggle key={st.id} selected={step.type === st.id}
+                            onClick={() => changeStepType(step.id, st.id)}>
                             <StepIco className="size-3.5" /> {st.label}
                           </PillToggle>
                         )
                       })}
                     </div>
-                    <div className="ml-auto flex items-center">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-7"
-                        onClick={() => moveStep(idx, -1)}
-                        disabled={idx === 0}
-                        aria-label="Move up"
-                      >
-                        <ChevronUp className="size-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-7"
-                        onClick={() => moveStep(idx, 1)}
-                        disabled={idx === wf.steps.length - 1}
-                        aria-label="Move down"
-                      >
-                        <ChevronDown className="size-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-7 text-muted-foreground hover:text-destructive"
-                        onClick={() => removeStep(step.id)}
-                        disabled={wf.steps.length === 1}
-                        aria-label="Remove step"
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="mt-3">
+                    <Separator />
                     <StepConfig step={step} onConfig={(k, v) => setStepConfig(step.id, k, v)} />
                   </div>
-                </div>
-              ))}
-            </div>
+                )
+              })()
+            )}
           </div>
         </div>
 
@@ -481,6 +508,55 @@ function EditorDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function Connector() {
+  return <div className="ml-[27px] h-4 w-px bg-border" aria-hidden />
+}
+
+function FlowNode({
+  selected,
+  onClick,
+  icon,
+  color,
+  kicker,
+  title,
+  sub,
+}: {
+  selected: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  color?: string
+  kicker: string
+  title: string
+  sub: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'flex w-full items-center gap-2.5 rounded-lg border p-3 text-left transition',
+        selected
+          ? 'border-primary bg-primary/5 ring-1 ring-primary/40'
+          : 'bg-card/50 hover:border-primary/40',
+      )}
+    >
+      <div
+        className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted"
+        style={color ? { color } : undefined}
+      >
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {kicker}
+        </div>
+        <div className="truncate text-sm font-medium">{title}</div>
+        <div className="truncate text-xs text-muted-foreground">{sub}</div>
+      </div>
+    </button>
   )
 }
 
