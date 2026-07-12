@@ -29,7 +29,11 @@ async function emit(event: AppEvent): Promise<number | null> {
 }
 
 export function ManualEvents({ store }: { store: Store }) {
-  const online = store.backendOnline !== false
+  // Gate on whether a backend URL is configured, not the flaky `backendOnline`
+  // flag (which perception/camera hiccups can latch false). The actual POST
+  // result drives the toast, so a truly-down backend still reports clearly.
+  void store
+  const online = api.configured()
   const [type, setType] = useState('spill')
   const [zone, setZone] = useState('zone_a')
   const [count, setCount] = useState('')

@@ -714,12 +714,13 @@ export function useStore() {
       }
       try {
         const st = await createCamera(payload)
-        markBackend(true)
+        // NB: camera ops hit the perception service (:8008), NOT the automation
+        // backend (:8000) — so don't touch `markBackend` here, or a perception
+        // hiccup would wrongly mark automation offline and disable event sending.
         const camera = backendToCamera(st, input.source, input.url)
         setState((s) => ({ ...s, cameras: [...s.cameras, camera] }))
         return { online: true }
       } catch {
-        markBackend(false)
         const id = uid('cam')
         localCameraIds.current.add(id)
         const camera: Camera = { ...input, id, status: 'connecting', eventsToday: 0 }
@@ -742,9 +743,8 @@ export function useStore() {
       }
       try {
         await apiDeleteCamera(id)
-        markBackend(true)
       } catch (err) {
-        markBackend(false)
+        // (perception service, not automation — see connectCamera note)
         // Restore it (keep it visible) so it doesn't orphan on the backend.
         // A 404 means the camera was already gone from perception, so keep it
         // removed locally instead of restoring it immediately.
@@ -782,7 +782,6 @@ export function useStore() {
       }))
       try {
         const st = await call(id)
-        markBackend(true)
         setState((s) => ({
           ...s,
           cameras: s.cameras.map((c) =>
@@ -801,7 +800,7 @@ export function useStore() {
           ),
         }))
       } catch {
-        markBackend(false)
+        // (perception service, not automation — see connectCamera note)
         // Revert the optimistic status so pause/resume doesn't stick on failure.
         if (prevStatus !== undefined) {
           setState((s) => ({
