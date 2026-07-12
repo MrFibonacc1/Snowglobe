@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
-import type { EventType } from '../types'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { AppEvent, EventType } from '../types'
+import type { Store } from '../store'
 import { SUGGESTED_EVENT_TYPES, eventMeta } from '../constants'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -12,6 +13,7 @@ import { PillToggle } from './Cameras'
 import { ConfidenceBar, EventIcon } from '../components/ui-kit'
 import { Upload, Check, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { api } from '../api'
 
 const PERCEPTION_URL =
   (import.meta.env.VITE_PERCEPTION_URL as string | undefined) ?? 'http://localhost:8008'
@@ -48,47 +50,47 @@ interface DetectResult {
   frames?: FrameResult[] // video
   summary?: SummaryRow[] // video
   frames_analyzed?: number
-  events: Record<string, unknown>[]
+  events?: Record<string, unknown>[]
 }
 
-export function Testing() {
-  const [file, setFile] = useState<File | null>(null)
+export function Testing({ store }: { store: Store }) {
   const [preview, setPreview] = useState<string | null>(null)
-  const [isVideo, setIsVideo] = useState(false)
+  const [videoDuration, setVideoDuration] = useState<number | null>(null)
   const [discover, setDiscover] = useState(true)
   const [selected, setSelected] = useState<EventType[]>([...SUGGESTED_EVENT_TYPES])
   const [customType, setCustomType] = useState('')
   const [zone, setZone] = useState('zone_a')
   const [minConf, setMinConf] = useState(0.5)
-  const [maxFrames, setMaxFrames] = useState(6)
   const [dragging, setDragging] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<DetectResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const file = store.testingFile
+  const isVideo = file?.type.startsWith('video/') ?? false
+  const busy = store.testingRun?.running ?? false
+  const result = (store.testingResult as DetectResult | null) ?? null
+  const error = store.testingError
 
   useEffect(() => {
     if (!file) {
       setPreview(null)
+      setVideoDuration(null)
       return
     }
     const url = URL.createObjectURL(file)
     setPreview(url)
+    if (!isVideo) setVideoDuration(null)
     return () => URL.revokeObjectURL(url)
-  }, [file])
+  }, [file, isVideo])
 
   const pick = (f: File | null | undefined) => {
     if (!f) return
     const image = f.type.startsWith('image/')
-    const video = f.type.startsWith('video/')
-    if (!image && !video) {
-      setError('Please choose an image or video file.')
+    if (!image && !f.type.startsWith('video/')) {
+      store.setTestingError('Please choose an image or video file.')
       return
     }
-    setError(null)
-    setResult(null)
-    setIsVideo(video)
-    setFile(f)
+    store.setTestingError(null)
+    store.setTestingResult(null)
+    store.setTestingFile(f)
   }
 
   const toggleEvent = (t: EventType) =>
@@ -103,13 +105,67 @@ export function Testing() {
     setCustomType('')
   }
 
-  const canRun = !!file && (discover || selected.length > 0)
+  const estimateVideoSampling = useCallback(() => {
+    if (!isVideo || !videoDuration || !Number.isFinite(videoDuration)) {
+      return { fps: 0.8, maxFrames: 8 }
+    }
+    const fps = videoDuration >= 180 ? 0.4 : videoDuration >= 60 ? 0.7 : 0.95
+    const maxFrames = Math.min(20, Math.max(4, Math.round(videoDuration * fps)))
+    return { fps: Number(fps.toFixed(2)), maxFrames }
+  }, [isVideo, videoDuration])
 
+  const canRun = !!file && (discover || selected.length > 0)
+  const refreshRuns = useCallback(async () => {
+    if (!api.configured()) return
+    await store.refreshRuns()
+    // Runs can be created async after workflow execution starts; poll once more.
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    await store.refreshRuns()
+    // and one more quick pass for slower agents.
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    await store.refreshRuns()
+  }, [store])
+
+  const waitForRunCompletion = useCallback(
+    async (runIds: string[]) => {
+      if (!api.configured() || runIds.length === 0) return
+      const target = new Set(runIds)
+      const startedAt = Date.now()
+      const timeoutMs = 12000
+      const minPollMs = 700
+
+      while (Date.now() - startedAt < timeoutMs) {
+        const runs = await store.refreshRuns()
+        const tracked = runs.filter((run) => target.has(run.id))
+
+        // If we have at least one matched run and none are still running, we're done.
+        if (tracked.length > 0 && !tracked.some((run) => run.status === 'running')) break
+
+        if (!tracked.length) {
+          // Even with a short window for async creation, the run may not have
+          // been inserted yet. Poll a bit longer and keep trying.
+          if (Date.now() - startedAt < timeoutMs - 3000) {
+            await new Promise((resolve) => setTimeout(resolve, minPollMs))
+            continue
+          }
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, minPollMs))
+      }
+
+      // Final authoritative refresh after the loop.
+      await refreshRuns()
+    },
+    [refreshRuns, store],
+  )
   async function run() {
     if (!canRun) return
-    setBusy(true)
-    setError(null)
-    setResult(null)
+    const mediaKind: 'image' | 'video' = isVideo ? 'video' : 'image'
+    let runError: string | null = null
+    store.startTestingRun({ kind: mediaKind, fileName: file?.name || 'upload' })
+    store.setTestingError(null)
+    store.setTestingResult(null)
+
     try {
       const fd = new FormData()
       fd.append('file', file as File)
@@ -118,21 +174,61 @@ export function Testing() {
       fd.append('zone', zone)
       fd.append('min_confidence', String(minConf))
       const endpoint = isVideo ? '/detect_video' : '/detect'
-      if (isVideo) fd.append('max_frames', String(maxFrames))
+      if (isVideo) {
+        const { fps, maxFrames } = estimateVideoSampling()
+        fd.append('fps', String(fps))
+        fd.append('max_frames', String(maxFrames))
+      }
       const res = await fetch(`${PERCEPTION_URL}${endpoint}`, { method: 'POST', body: fd })
       if (!res.ok) {
         const body = await res.text()
         throw new Error(`detect API returned ${res.status}: ${body.slice(0, 200)}`)
       }
-      setResult(await res.json())
+      const payload = (await res.json()) as DetectResult
+      const events = parseResultEvents(payload.events ?? [])
+      store.setTestingResult(payload)
+
+      if (events.length) {
+        // Persist testing detections into the UI event log immediately.
+        store.ingestEvents(events)
+
+        // Send to automation so workflow runs are created and reflected in Runs.
+        let postError: string | null = null
+        const runIds: string[] = []
+        if (api.configured()) {
+          const posts = events.map(async (event) =>
+            api
+              .postEvent(event)
+              .then((res) => {
+                for (const runId of res?.runs_started ?? []) runIds.push(runId)
+                return res
+              })
+              .catch((err) => {
+                const msg = `Detection returned events, but posting to automation failed: ${
+                  err instanceof Error ? err.message : String(err)
+                }`
+                store.setTestingError(msg)
+                if (!postError) postError = msg
+                return null
+              }),
+          )
+          await Promise.all(posts)
+          if (postError) runError = postError
+          if (postError) store.setTestingError(postError)
+          await Promise.all([waitForRunCompletion(runIds), refreshRuns()])
+        }
+      } else {
+        // No emitted events means no action path for automation.
+        await refreshRuns()
+      }
     } catch (e) {
-      setError(
+      runError =
         `Could not reach the perception detect API at ${PERCEPTION_URL}. ` +
           `Start it (from the repo root) with:  python -m perception.server` +
-          `\n(${e instanceof Error ? e.message : String(e)})`,
-      )
+          `\n(${e instanceof Error ? e.message : String(e)})`
+      store.setTestingError(runError)
     } finally {
-      setBusy(false)
+      store.finishTestingRun({ error: runError ?? undefined })
     }
   }
 
@@ -159,15 +255,20 @@ export function Testing() {
             }}
           >
             {preview && isVideo ? (
-              <video src={preview} controls className="max-h-72 w-full object-contain" />
+              <video
+                src={preview}
+                controls
+                className="max-h-72 w-full object-contain"
+                onLoadedMetadata={(e) => setVideoDuration(e.currentTarget.duration)}
+              />
             ) : preview ? (
               <img src={preview} alt="upload preview" className="max-h-72 w-full object-contain" />
             ) : (
               <div className="flex flex-col items-center gap-2 p-8 text-center text-sm text-muted-foreground">
-                <Upload className="size-7" />
-                <div>
-                  <b className="text-foreground">Click to upload</b> or drag an image or video here
-                </div>
+                  <Upload className="size-7" />
+                  <div>
+                    <b className="text-foreground">Click to upload</b> or drag an image or video here
+                  </div>
                 <span className="text-xs">PNG / JPG / MP4, a photo, a frame, or a short clip</span>
               </div>
             )}
@@ -253,20 +354,12 @@ export function Testing() {
 
           {isVideo && (
             <div className="flex flex-col gap-2">
-              <Label>Frames to sample, {maxFrames}</Label>
-              <Slider
-                min={2}
-                max={12}
-                step={1}
-                value={[maxFrames]}
-                onValueChange={([v]) => setMaxFrames(v)}
-                className="mt-2.5"
-              />
-              <span className="text-xs text-muted-foreground">
-                {discover
-                  ? `Each frame is examined for any actionable event. ${maxFrames} frames.`
-                  : `Each frame runs every selected event type through the model, more frames = slower. ${maxFrames} frames x ${selected.length} type${selected.length === 1 ? '' : 's'}.`}
-              </span>
+              <Label>Frame sampling</Label>
+              <div className="text-xs text-muted-foreground">
+                Auto-adjusted for compute: about {estimateVideoSampling().fps.toFixed(2)} fps,
+                up to {estimateVideoSampling().maxFrames} frames
+                {videoDuration ? ` (video duration ${videoDuration.toFixed(0)}s)` : ''}
+              </div>
             </div>
           )}
 
@@ -365,13 +458,47 @@ export function Testing() {
                 })}
               </div>
 
-              <EventsBlock events={result.events} />
+                  <EventsBlock events={result.events ?? []} />
             </div>
           )}
         </CardContent>
       </Card>
     </div>
   )
+}
+
+function parseResultEvents(raw: Record<string, unknown>[]): AppEvent[] {
+  return raw
+    .map((r): AppEvent | null => {
+      if (!r || typeof r !== 'object') return null
+      const event = r as Partial<AppEvent> & {
+        event_id?: unknown
+        event_type?: unknown
+        timestamp?: unknown
+        confidence?: unknown
+        location?: unknown
+      }
+      if (
+        typeof event.event_id !== 'string' ||
+        typeof event.event_type !== 'string' ||
+        typeof event.timestamp !== 'string' ||
+        typeof event.confidence !== 'number' ||
+        typeof event.location !== 'string'
+      ) {
+        return null
+      }
+      const confidence = Math.min(1, Math.max(0, event.confidence))
+      return {
+        event_id: event.event_id,
+        event_type: event.event_type,
+        timestamp: event.timestamp,
+        confidence,
+        location: event.location,
+        snapshot_url: typeof event.snapshot_url === 'string' ? event.snapshot_url : undefined,
+        payload: typeof event.payload === 'object' && event.payload !== null ? event.payload : undefined,
+      }
+    })
+    .filter((event): event is AppEvent => Boolean(event))
 }
 
 function EventsBlock({ events }: { events: Record<string, unknown>[] }) {
@@ -464,7 +591,7 @@ function VideoResults({ r, minConf }: { r: DetectResult; minConf: number }) {
         </div>
       </div>
 
-      <EventsBlock events={r.events} />
+      <EventsBlock events={r.events ?? []} />
     </div>
   )
 }

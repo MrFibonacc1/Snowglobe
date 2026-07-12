@@ -17,7 +17,7 @@ All clips are royalty-free stock (Mixkit), 720p, a few seconds each.
 | 04 | `04_grocery_produce_shopper.mp4` | One person in the produce aisle | `person_count` = **1**, conf ~0.95 | Single-occupant baseline |
 | 05 | `05_foot_traffic_street.mp4` | People moving down a street | `person_count` ~5–10, `foot_traffic` ~10 | Moderate throughput baseline |
 
-## CCTV evaluation clips (06-11)
+## CCTV evaluation clips (06-15)
 
 These are fixed-camera or surveillance-style evaluation clips collected from
 public, reusable sources. They have been visually checked, but their VLM outputs
@@ -32,12 +32,15 @@ set above.
 | 09 | `09_shopping_center_assistant_cctv.mp4` | Shopping-centre corridor with customer/shop-assistant interaction | 67 s, 384x288, 25 fps H.264 MP4 | Person count and retail activity description |
 | 10 | `10_bank_tornado_cctv.mp4` | Actual fixed bank CCTV during a tornado impact | 39.4 s, 1272x718 H.264 MP4 | Environmental hazard and incident description |
 | 11 | `11_warehouse_loading_dock.mp4` | Warehouse loading dock with workers and equipment; static reference shot, not CCTV | 20.3 s, 1920x1080 H.264 MP4 | Person count and warehouse activity baseline |
+| 12 | `12_trayvon_7eleven_cctv.mp4` | 7-Eleven interior CCTV of a shopper and cashier-facing activity | 52.4 s, 640x480 VP/phone-like fixed view, H.264 MP4 | Store-entry/shopper event + person activity in fixed indoor retail view |
+| 13 | `13_supermarket_grocery_products.mp4` | Produce-display grocery footage (frontal product movement and shoppers passing by) | 2:22.8, 1920x1080 H.264 MP4 | B-roll-like grocery retail scene for person detection and zone activity tests |
+| 14 | `14_onestopenter1front.mp4` | Front-view store-entry corridor scene with people | 60.0 s, 384x288 H.264 MP4 | Store entry/exit and person occupancy baseline |
+| 15 | `15_onestopmovenoenter1front.mp4` | Front-view retail-corridor people flow with waiting/throughput patterns | 66.6 s, 384x288 H.264 MP4 | Person count and foot traffic under moderate crowding |
 
 Every clip in this main folder is H.264 MP4 with `yuv420p` pixel format and
-fast-start metadata so editor and browser previews work. Clips 07-11 were
-transcoded without audio; their unchanged source MPEG/WebM files are retained in
-`source_originals/`. A sequential check through `perception.sampler`
-successfully decoded all six MP4s and produced 216 total frames at 1 fps.
+fast-start metadata so editor and browser previews work. Source files for MPEG/WebM
+assets are retained in `source_originals/`; some converted MP4s are intentionally
+audio-stripped. A quick `ffprobe` sanity check confirms these clips are all decodable in this repo.
 
 ## Run one through the pipeline
 
@@ -97,3 +100,14 @@ Retrieved 2026-07-11. Keep these attributions with any redistributed copies.
   licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The local
   MP4 is a video-only H.264 transcode; the unchanged WebM is in
   `source_originals/`.
+
+- **12 — 7-Eleven (Sanford, Florida).** [Trayvon Martin 7-Eleven CCTV footage.webm](https://commons.wikimedia.org/wiki/File:Trayvon_Martin_7-Eleven_CCTV_footage.webm)
+  is public-domain automated CCTV from Wikimedia Commons.
+
+- **13 — USDA Grocery Store Footage.** [Supermarket Grocery Products (13083756734).webm](https://commons.wikimedia.org/wiki/File:Supermarket_Grocery_Products_%2813083756734%29.webm)
+  is U.S. federal government source content and is public-domain on Wikimedia.
+
+- **14/15 — Additional CAVIAR shopping scenes.** Front-view sequences from the CAVIAR shopping-center store scenarios:
+  [14 — OneStopEnter1front.mpg](https://homepages.inf.ed.ac.uk/rbf/CAVIARDATA2/OneStopEnter1front/OneStopEnter1front.mpg)
+  and [15 — OneStopMoveNoEnter1front.mpg](https://homepages.inf.ed.ac.uk/rbf/CAVIARDATA2/OneStopMoveNoEnter1front/OneStopMoveNoEnter1front.mpg),
+  reused under CAVIAR dataset usage terms.

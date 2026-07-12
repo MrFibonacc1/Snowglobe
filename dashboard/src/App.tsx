@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/sidebar'
 import { Separator } from '@/components/ui/separator'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Toaster } from '@/components/ui/sonner'
 import { StatusDot } from './components/ui-kit'
 import { Overview } from './pages/Overview'
@@ -17,6 +18,7 @@ import { WorkflowBuilder } from './pages/WorkflowBuilder'
 import { Runs } from './pages/Runs'
 import { Events } from './pages/Events'
 import { Testing } from './pages/Testing'
+import { Loader2 } from 'lucide-react'
 
 const TITLES: Record<View, { title: string; sub: string }> = {
   overview: { title: 'Overview', sub: 'Live perception and agent activity at a glance' },
@@ -54,6 +56,15 @@ export default function App() {
             <p className="text-xs text-muted-foreground">{sub}</p>
           </div>
           <div className="flex items-center gap-2">
+            {store.testingRun?.running ? (
+              <Badge
+                variant="outline"
+                className="gap-1.5 border-amber-500/60 text-amber-500"
+              >
+                <Loader2 className="size-3 animate-spin" />
+                Testing in progress
+              </Badge>
+            ) : null}
             <Button
               variant={store.live ? 'default' : 'outline'}
               size="sm"
@@ -76,7 +87,7 @@ export default function App() {
           {view === 'automations' && <WorkflowBuilder store={store} />}
           {view === 'runs' && <Runs store={store} />}
           {view === 'events' && <Events store={store} />}
-          {view === 'testing' && <Testing />}
+          {view === 'testing' && <Testing store={store} />}
         </main>
       </SidebarInset>
       <Toaster />

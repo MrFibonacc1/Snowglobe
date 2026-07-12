@@ -10,7 +10,7 @@ export const seedCameras: Camera[] = [
     status: 'live',
     fps: 1,
     detects: ['person_count', 'foot_traffic', 'spill'],
-    eventsToday: 42,
+    eventsToday: 0,
   },
   {
     id: 'cam_warehouse',
@@ -21,7 +21,7 @@ export const seedCameras: Camera[] = [
     status: 'live',
     fps: 1,
     detects: ['safety_violation', 'spill', 'person_count'],
-    eventsToday: 18,
+    eventsToday: 0,
   },
   {
     id: 'cam_entrance',
@@ -31,7 +31,7 @@ export const seedCameras: Camera[] = [
     status: 'connecting',
     fps: 1,
     detects: ['foot_traffic', 'person_count'],
-    eventsToday: 7,
+    eventsToday: 0,
   },
 ]
 
@@ -121,9 +121,6 @@ export const seedAutomations: Automation[] = [
   },
 ]
 
-const now = Date.now()
-const ago = (mins: number) => new Date(now - mins * 60_000).toISOString()
-
 // Mirror of automation/seeds.py so the workflow builder shows realistic data
 // even before the backend is reachable.
 export const seedWorkflows: Workflow[] = [
@@ -176,37 +173,4 @@ export const seedWorkflows: Workflow[] = [
   },
 ]
 
-export const seedEvents: AppEvent[] = [
-  {
-    event_id: 'evt_1',
-    event_type: 'spill',
-    timestamp: ago(3),
-    confidence: 0.91,
-    location: 'zone_b',
-    payload: { detail: 'Liquid pooled near loading bay' },
-  },
-  {
-    event_id: 'evt_2',
-    event_type: 'person_count',
-    timestamp: ago(8),
-    confidence: 0.86,
-    location: 'zone_a',
-    payload: { count: 23 },
-  },
-  {
-    event_id: 'evt_3',
-    event_type: 'safety_violation',
-    timestamp: ago(15),
-    confidence: 0.82,
-    location: 'zone_b',
-    payload: { detail: 'Worker without hard hat' },
-  },
-  {
-    event_id: 'evt_4',
-    event_type: 'foot_traffic',
-    timestamp: ago(22),
-    confidence: 0.78,
-    location: 'zone_c',
-    payload: { count: 140, window: '1h' },
-  },
-]
+export const seedEvents: AppEvent[] = []

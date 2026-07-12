@@ -29,13 +29,41 @@ interface PersistedState {
   workflows: Workflow[]
 }
 
+interface TestingRunState {
+  id: string
+  running: boolean
+  kind: 'image' | 'video'
+  fileName: string
+  fileType?: string
+  startedAt: string
+  error?: string
+}
+
+type TestingResult = unknown
+
 function load(): PersistedState {
   try {
     const raw = localStorage.getItem(KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<PersistedState>
+      const seededEvents = [
+        'evt_1',
+        'evt_2',
+        'evt_3',
+        'evt_4',
+      ]
       // workflows was added later — backfill for older persisted state.
-      return { ...blank(), ...parsed } as PersistedState
+      const hydrated = { ...blank(), ...parsed } as PersistedState
+      const events =
+        hydrated.events.length === 4 &&
+        hydrated.events.every((event, idx) => event.event_id === seededEvents[idx])
+          ? []
+          : hydrated.events
+      return {
+        ...hydrated,
+        events,
+        cameras: rebuildEventsToday(hydrated.cameras, events),
+      }
     }
   } catch {
     /* ignore corrupt state */
@@ -57,6 +85,23 @@ function blank(): PersistedState {
 // Small non-crypto id. Suffix keeps ids unique within a render tick.
 let seq = 0
 const uid = (p: string) => `${p}_${Date.now().toString(36)}${(seq++).toString(36)}`
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function rebuildEventsToday(cameras: Camera[], events: AppEvent[]) {
+  const cutoff = Date.now() - DAY_MS
+  const counts = new Map<string, number>()
+
+  for (const e of events) {
+    const ts = Date.parse(e.timestamp)
+    if (Number.isNaN(ts) || ts < cutoff) continue
+    counts.set(e.location, (counts.get(e.location) ?? 0) + 1)
+  }
+
+  return cameras.map((camera) => ({
+    ...camera,
+    eventsToday: counts.get(camera.zone) ?? 0,
+  }))
+}
 
 export function useStore() {
   const [state, setState] = useState<PersistedState>(load)
@@ -64,6 +109,10 @@ export function useStore() {
   // null = unknown, true/false = last known backend reachability.
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null)
   const [runs, setRuns] = useState<Run[]>([])
+  const [testingRun, setTestingRun] = useState<TestingRunState | null>(null)
+  const [testingError, setTestingError] = useState<string | null>(null)
+  const [testingResult, setTestingResult] = useState<TestingResult | null>(null)
+  const [testingFile, setTestingFile] = useState<File | null>(null)
   const stateRef = useRef(state)
   stateRef.current = state
   const backendRef = useRef(backendOnline)
@@ -83,11 +132,8 @@ export function useStore() {
 
   const pushEvent = useCallback((event: AppEvent) => {
     setState((s) => {
-      const cameras = s.cameras.map((c) =>
-        c.zone === event.location && c.status === 'live'
-          ? { ...c, eventsToday: c.eventsToday + 1 }
-          : c,
-      )
+      const events = [event, ...s.events].slice(0, 200)
+      const nextCameras = rebuildEventsToday(s.cameras, events)
       // Fire any enabled automation matching this event (offline simulation only).
       const activity: ActivityItem[] = []
       const automations = s.automations.map((a) => {
@@ -109,9 +155,9 @@ export function useStore() {
       })
       return {
         ...s,
-        cameras,
+        cameras: nextCameras,
+        events,
         automations,
-        events: [event, ...s.events].slice(0, 200),
         activity: [...activity, ...s.activity].slice(0, 100),
       }
     })
@@ -122,20 +168,61 @@ export function useStore() {
       const known = new Set(s.events.map((e) => e.event_id))
       const fresh = incoming.filter((e) => !known.has(e.event_id))
       if (fresh.length === 0) return s
-      const cameras = s.cameras.map((c) => {
-        const n = fresh.filter((e) => e.location === c.zone && c.status === 'live').length
-        return n ? { ...c, eventsToday: c.eventsToday + n } : c
-      })
+      const nextEvents = [...fresh, ...s.events].slice(0, 200)
+      const cameras = rebuildEventsToday(s.cameras, nextEvents)
       return {
         ...s,
         cameras,
-        events: [...fresh, ...s.events].slice(0, 200),
+        events: nextEvents,
       }
     })
   }, [])
 
+  const ingestEvents = useCallback((incoming: AppEvent[]) => {
+    mergeEvents(incoming)
+  }, [mergeEvents])
+
+  const refreshRuns = useCallback(async () => {
+    if (!api.configured()) return []
+    try {
+      const latestRuns = await api.listRuns(30)
+      markBackend(true)
+      setRuns(latestRuns)
+      return latestRuns
+    } catch {
+      markBackend(false)
+      return []
+    }
+  }, [markBackend])
+
+  const startTestingRun = useCallback((params: { kind: 'image' | 'video'; fileName: string }) => {
+    setTestingRun({
+      id: uid('testrun'),
+      running: true,
+      kind: params.kind,
+      fileName: params.fileName,
+      startedAt: new Date().toISOString(),
+    })
+    setTestingResult(null)
+    setTestingError(null)
+  }, [])
+
+  const finishTestingRun = useCallback((params?: { error?: string }) => {
+    setTestingRun((prev) =>
+      prev
+        ? {
+            ...prev,
+            running: false,
+            error: params?.error,
+          }
+        : prev
+    )
+    if (params?.error) setTestingError(params.error)
+  }, [])
+
   // On mount (and whenever the backend is configured), hydrate workflows from
-  // the service so the builder edits real data. Falls back to seeded local.
+  // the service so the builder edits real data. Also hydrate events/runs so
+  // the dashboard starts from live data instead of seeded placeholders.
   useEffect(() => {
     if (!api.configured()) return
     let cancelled = false
@@ -145,6 +232,24 @@ export function useStore() {
         if (cancelled) return
         markBackend(true)
         setState((s) => ({ ...s, workflows: wfs }))
+      })
+      .catch(() => markBackend(false))
+    api
+      .listEvents(100)
+      .then((events) => {
+        if (cancelled) return
+        setState((s) => ({
+          ...s,
+          events,
+          cameras: rebuildEventsToday(s.cameras, events),
+        }))
+      })
+      .catch(() => markBackend(false))
+    api
+      .listRuns(30)
+      .then((latestRuns) => {
+        if (cancelled) return
+        setRuns(latestRuns)
       })
       .catch(() => markBackend(false))
     return () => {
@@ -367,6 +472,10 @@ export function useStore() {
     localStorage.removeItem(KEY)
     setState(load())
     setRuns([])
+    setTestingRun(null)
+    setTestingError(null)
+    setTestingResult(null)
+    setTestingFile(null)
   }, [])
 
   return {
@@ -378,6 +487,7 @@ export function useStore() {
     addCamera,
     removeCamera,
     toggleCamera,
+    ingestEvents,
     setIntegrationStatus,
     addIntegration,
     refreshWorkflows,
@@ -386,8 +496,18 @@ export function useStore() {
     toggleWorkflow,
     testWorkflow,
     addAutomation,
+    testingFile,
+    setTestingFile,
+    refreshRuns,
+    testingError,
+    setTestingError,
+    testingResult,
+    setTestingResult,
     toggleAutomation,
     removeAutomation,
+    testingRun,
+    startTestingRun,
+    finishTestingRun,
     resetDemo,
   }
 }

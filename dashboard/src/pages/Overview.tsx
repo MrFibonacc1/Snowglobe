@@ -23,7 +23,11 @@ export function Overview({ store }: { store: Store }) {
   const liveCams = store.cameras.filter((c) => c.status === 'live').length
   const connectedInts = store.integrations.filter((i) => i.status === 'connected').length
   const enabledAutos = store.workflows.filter((w) => w.enabled).length
-  const eventsToday = store.cameras.reduce((n, c) => n + c.eventsToday, 0)
+  const dayCutoff = Date.now() - 24 * 60 * 60 * 1000
+  const eventsToday = store.events.filter((e) => {
+    const ts = Date.parse(e.timestamp)
+    return !Number.isNaN(ts) && ts >= dayCutoff
+  }).length
 
   const useRuns = store.runs.length > 0
 
