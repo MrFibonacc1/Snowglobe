@@ -114,7 +114,7 @@ WORKFLOWS = [
                 "type": "h_agent",
                 "config": {
                     "task": "custom_url",
-                    "agent": "h/web-surfer-flash",
+                    "agent": "store-agent-speed",
                     "share": True,
                     "instructions": (
                         "It's a slow period at the shop, so use the downtime to "
@@ -173,7 +173,7 @@ WORKFLOWS = [
                 "id": "s1",
                 "type": "h_agent",
                 "config": {
-                    "agent": "h/web-surfer-flash",
+                    "agent": "store-agent-speed",
                     "task": "custom_url",
                     # Real, always-up HTML form standing in for a store restock
                     # portal so the demo never depends on a private URL.

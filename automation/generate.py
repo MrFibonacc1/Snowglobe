@@ -55,13 +55,13 @@ For "all human traffic" set event_type to "foot_traffic" (or "person_count").
 
 Step types and their config:
 - h_agent  -> a computer-use agent that drives a web browser. config:
-    { "agent": "h/web-surfer-flash" | "h/web-surfer-pro" | "h/deep-search-pro",
+    { "agent": "store-agent-speed" | "h/deep-search-pro",
       "task": "custom_url" | "google_form" | "ticket",
       "url": "<optional target url>",
       "instructions": "<what to do; use {{event.location}}, {{event.timestamp}}, {{event.payload.count}}, {{event.payload.detail}}>",
       "share": true }
-    Use h/deep-search-pro for research tasks, h/web-surfer-pro for interacting
-    with a real app/site, h/web-surfer-flash for simple pages.
+    Use store-agent-speed (our custom shop agent) for interacting with apps/sites
+    and filling forms/docs; use h/deep-search-pro only for open-ended research.
 - composio -> an API action. config: { "action": "slack_message", "channel": "#alerts", "text": "..." }
     (also drive_upload / sheets_append).
 - condition -> gate the run. config: { "expression": "payload.count > 20" }  (ops: > < >= <= == !=)
@@ -75,14 +75,14 @@ Every step needs an "id" (s1, s2, ...) and a "type" and a "config".
 Example — "when there's a spill, log the time and location to my google doc":
 {"name":"Spill → log to Google Doc","enabled":true,
  "trigger":{"event_type":"spill","min_confidence":0.6,"cooldown_sec":60},
- "steps":[{"id":"s1","type":"h_agent","config":{"agent":"h/web-surfer-pro","task":"custom_url",
+ "steps":[{"id":"s1","type":"h_agent","config":{"agent":"store-agent-speed","task":"custom_url",
    "url":"<google doc url>","share":true,
    "instructions":"Open the doc and append a line: Spill at {{event.timestamp}} in {{event.location}}."}}]}
 
 Example — "every day at 9am, check the last 24h of foot traffic and email me a summary":
 {"name":"Daily 9am foot-traffic digest","enabled":true,
  "trigger":{"type":"schedule","cron":"0 9 * * *","lookback_hours":24,"event_type":"foot_traffic"},
- "steps":[{"id":"s1","type":"h_agent","config":{"agent":"h/web-surfer-pro","task":"custom_url",
+ "steps":[{"id":"s1","type":"h_agent","config":{"agent":"store-agent-speed","task":"custom_url",
    "instructions":"Compose a summary: {{event.payload.total_count}} people across {{event.payload.window_hours}}h, busiest zone {{event.payload.busiest_zone}}. Email it to the manager."}}]}
 
 Return ONLY the JSON object."""
@@ -260,7 +260,7 @@ def _heuristic(description: str) -> dict:
         }})
     elif re.search(r"doc|document|log|record|form|portal|ticket|website|order|update", low):
         steps.append({"id": f"s{sid}", "type": "h_agent", "config": {
-            "agent": "h/web-surfer-pro", "task": "custom_url", "share": True,
+            "agent": "store-agent-speed", "task": "custom_url", "share": True,
             "instructions": (
                 f"{description}. Include the event details: time {{{{event.timestamp}}}}, "
                 "location {{event.location}}, detail {{event.payload.detail}}."

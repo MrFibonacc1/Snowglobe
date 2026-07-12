@@ -12,6 +12,7 @@ import type {
   Run,
   RunStep,
   Workflow,
+  TestWorkflowInput,
 } from './types'
 import { SUGGESTED_EVENT_TYPES, eventMeta } from './constants'
 import {
@@ -930,10 +931,10 @@ export function useStore() {
   )
 
   const testWorkflow = useCallback(
-    async (id: string): Promise<string | null> => {
+    async (id: string, input?: TestWorkflowInput): Promise<string | null> => {
       if (!api.configured()) return null
       try {
-        const { run_id } = await api.testWorkflow(id)
+        const { run_id } = await api.testWorkflow(id, input)
         markBackend(true)
         // Pull the fresh run in immediately so the Runs view lights up.
         try {

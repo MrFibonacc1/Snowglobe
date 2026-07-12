@@ -13,6 +13,7 @@ import type {
   Run,
   Workflow,
   AgentFeed,
+  TestWorkflowInput,
 } from './types'
 
 export const AUTOMATION_URL = import.meta.env.VITE_AUTOMATION_URL as
@@ -146,9 +147,10 @@ export const api = {
     req<Workflow>(`/workflows/${id}`, { method: 'PUT', body: JSON.stringify(wf) }),
   deleteWorkflow: (id: string) =>
     req<void>(`/workflows/${id}`, { method: 'DELETE' }),
-  testWorkflow: (id: string) =>
+  testWorkflow: (id: string, input?: TestWorkflowInput) =>
     req<{ accepted: boolean; run_id: string }>(`/workflows/${id}/test`, {
       method: 'POST',
+      body: JSON.stringify(input ?? {}),
     }),
 
   // runs

@@ -170,6 +170,14 @@ export interface Workflow {
   steps: WorkflowStep[]
 }
 
+// Optional inputs supplied when firing a workflow's Test button — lets the
+// tester provide the product/item (and zone/confidence) the workflow acts on.
+export interface TestWorkflowInput {
+  product?: string
+  location?: string
+  confidence?: number
+}
+
 export type RunStatus = 'running' | 'done' | 'failed'
 export type StepStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped'
 

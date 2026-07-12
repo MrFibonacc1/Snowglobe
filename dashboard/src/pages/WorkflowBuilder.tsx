@@ -17,7 +17,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { Store } from '../store'
-import type { StepType, Workflow, WorkflowStep } from '../types'
+import type { StepType, TestWorkflowInput, Workflow, WorkflowStep } from '../types'
 import { SUGGESTED_EVENT_TYPES, eventMeta } from '../constants'
 import { EventIcon } from '../components/ui-kit'
 import type { ComponentType } from 'react'
@@ -149,9 +149,10 @@ export function WorkflowBuilder({ store }: { store: Store }) {
   const [editing, setEditing] = useState<{ wf: Workflow; isNew: boolean } | null>(null)
   const [sendingEvent, setSendingEvent] = useState(false)
   const [creating, setCreating] = useState(false) // "New workflow" → describe-first dialog
+  const [testing, setTesting] = useState<Workflow | null>(null) // Test → input dialog
 
-  const runTest = async (id: string, name: string) => {
-    const runId = await store.testWorkflow(id)
+  const runTest = async (id: string, name: string, input?: TestWorkflowInput) => {
+    const runId = await store.testWorkflow(id, input)
     if (runId) {
       toast.success(`Triggered "${name || 'workflow'}"`, {
         description: 'Watch it execute on the Runs page.',
@@ -266,7 +267,7 @@ export function WorkflowBuilder({ store }: { store: Store }) {
                       variant="mustard"
                       size="sm"
                       className="gap-1.5"
-                      onClick={() => runTest(wf.id, wf.name)}
+                      onClick={() => setTesting(wf)}
                       disabled={!store.backendOnline}
                       title={store.backendOnline ? 'Fire a synthetic event' : 'Backend offline'}
                     >
@@ -302,6 +303,18 @@ export function WorkflowBuilder({ store }: { store: Store }) {
       )}
 
       {sendingEvent && <SendTestEventDialog onClose={() => setSendingEvent(false)} />}
+
+      {testing && (
+        <TestWorkflowDialog
+          workflow={testing}
+          onClose={() => setTesting(null)}
+          onRun={(input) => {
+            const wf = testing
+            setTesting(null)
+            void runTest(wf.id, wf.name, input)
+          }}
+        />
+      )}
 
       {creating && (
         <NewWorkflowDialog
@@ -408,6 +421,85 @@ function NewWorkflowDialog({
             className="order-2 text-muted-foreground sm:order-1"
           >
             Start from blank
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function TestWorkflowDialog({
+  workflow,
+  onClose,
+  onRun,
+}: {
+  workflow: Workflow
+  onClose: () => void
+  onRun: (input: TestWorkflowInput) => void
+}) {
+  const [product, setProduct] = useState('')
+  const [zone, setZone] = useState(workflow.trigger.zone ?? '')
+  const isSchedule = workflow.trigger.type === 'schedule'
+
+  const run = () => {
+    const input: TestWorkflowInput = {}
+    if (product.trim()) input.product = product.trim()
+    if (zone.trim()) input.location = zone.trim()
+    onRun(input)
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Play className="size-4 text-primary" /> Test “{workflow.name}”
+          </DialogTitle>
+          <DialogDescription>
+            {isSchedule
+              ? 'Runs this scheduled workflow now over its lookback window.'
+              : 'Fires a synthetic event at this workflow. Optionally give it a product so the agent knows what to act on.'}
+          </DialogDescription>
+        </DialogHeader>
+
+        {!isSchedule && (
+          <div className="flex flex-col gap-3 py-1">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="test-product">Product / item (optional)</Label>
+              <Input
+                id="test-product"
+                value={product}
+                onChange={(e) => setProduct(e.target.value)}
+                placeholder="e.g. coke"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') run()
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Sent to the workflow as{' '}
+                <code className="rounded bg-muted px-1">{'{{event.payload.product}}'}</code> and{' '}
+                <code className="rounded bg-muted px-1">{'{{event.payload.detail}}'}</code>.
+              </p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="test-zone">Zone (optional)</Label>
+              <Input
+                id="test-zone"
+                value={zone}
+                onChange={(e) => setZone(e.target.value)}
+                placeholder="zone_test"
+              />
+            </div>
+          </div>
+        )}
+
+        <DialogFooter className="mt-2">
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={run} className="gap-1.5">
+            <Play className="size-4" /> Run test
           </Button>
         </DialogFooter>
       </DialogContent>
