@@ -207,6 +207,7 @@ function AddCameraDialog({
   const [zone, setZone] = useState('zone_a')
   const [source, setSource] = useState<CameraSource>('rtsp')
   const [url, setUrl] = useState('')
+  const [webcamIndex, setWebcamIndex] = useState('1')
   const [detects, setDetects] = useState<EventType[]>([])
   const [customType, setCustomType] = useState('')
   const [useGateway, setUseGateway] = useState(true)
@@ -222,7 +223,8 @@ function AddCameraDialog({
   const [resolving, setResolving] = useState(false)
 
   const needsUrl = source === 'rtsp' || source === 'hls'
-  const valid = name.trim() && zone.trim() && (!needsUrl || url.trim())
+  const usesWebcamIndex = source === 'webcam'
+  const valid = name.trim() && zone.trim() && (usesWebcamIndex ? webcamIndex.trim() : !needsUrl || url.trim())
   const credsValid = name.trim() && zone.trim() && username.trim()
 
   const toggle = (t: EventType) =>
@@ -471,6 +473,18 @@ function AddCameraDialog({
               />
             </Field>
 
+            {usesWebcamIndex && (
+              <Field label="Webcam index" hint="Use the index OpenCV should open. If your iPhone is available here, try 1.">
+                <Input
+                  value={webcamIndex}
+                  type="number"
+                  min="0"
+                  onChange={(e) => setWebcamIndex(e.target.value)}
+                  placeholder="1"
+                />
+              </Field>
+            )}
+
             {needsUrl && (
               <>
                 <Field
@@ -528,7 +542,7 @@ function AddCameraDialog({
                   name: name.trim(),
                   zone: zone.trim(),
                   source,
-                  url: needsUrl ? url.trim() : undefined,
+                  url: usesWebcamIndex ? webcamIndex.trim() : needsUrl ? url.trim() : undefined,
                   fps: 1,
                   detects,
                   ...(needsUrl ? { use_gateway: useGateway } : {}),
